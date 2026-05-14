@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+{% block title %}Analyser — PromptGuard{% endblock %}
+{% block nav_analyser %}active{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="page-title">Prompt Analyser</div>
+  <div class="page-sub">Paste any prompt to scan it for injection attacks.</div>
+
+  <div class="card">
+    <label for="prompt-input">Prompt to analyse</label>
+    <textarea id="prompt-input" rows="5" placeholder="Type or paste any prompt here..."></textarea>
+    <div style="margin-top:1rem;display:flex;align-items:center;gap:1rem;">
+      <button class="btn btn-primary" id="analyse-btn" onclick="runAnalysis()">Analyse</button>
+      <div class="loader" id="loader">
+        <div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div>
+        <span>Scanning...</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card result-hidden" id="result-card">
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;">
+      <span id="decision-badge" class="badge"></span>
+      <span id="threat-label" style="font-family:var(--font-mono);font-size:0.8rem;color:var(--muted);"></span>
+      <span style="margin-left:auto;font-family:var(--font-mono);font-size:0.75rem;color:var(--muted);" id="time-label"></span>
+    </div>
+    <div class="section-title">Risk Score</div>
+    <div class="risk-bar-wrap">
+      <div class="risk-bar-label">
+        <span>0 — Safe</span><span id="score-label">0 / 100</span><span>100 — Critical</span>
+      </div>
+      <div class="risk-bar-track">
+        <div class="risk-bar-fill" id="risk-fill" style="width:0%"></div>
+      </div>
+    </div>
+    <div style="margin-top:1.25rem;">
+      <div class="section-title">Attack Types Detected</div>
+      <div id="attack-types"></div>
+    </div>
+    <div style="margin-top:1.25rem;">
+      <div class="section-title">Why was this flagged?</div>
+      <ul class="reasons" id="reasons-list"></ul>
+    </div>
+    <div style="margin-top:1rem;font-family:var(--font-mono);font-size:0.75rem;color:var(--muted);">
+      Semantic score: <span id="semantic-score">—</span>
+    </div>
+  </div>
+</div>
+<script>
+  function getRiskColor(s){return s>=70?'var(--danger)':s>=30?'var(--warn)':'var(--safe)';}
+  function getBadgeClass(d){return d==='BLOCK'?'badge-block':d==='WARN'?'badge-warn':'badge-allow';}
+  async function runAnalysis(){
+    const prompt=document.getElementById('prompt-input').value.trim();
+    if(!prompt)return;
+    const btn=document.getElementById('analyse-btn');
+    const loader=document.getElementById('loader');
+    const result=document.getElementById('result-card');
+    btn.disabled=true; loader.classList.add('active'); result.classList.add('result-hidden');
+    try{
+      const res=await fetch('/api/analyze',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')||''},
+        body:JSON.stringify({prompt})
+      });
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||'Analysis failed');
+      const badge=document.getElementById('decision-badge');
+      badge.textContent=data.decision; badge.className=`badge ${getBadgeClass(data.decision)}`;
+      document.getElementById('threat-label').textContent=`Threat Level: ${data.threat_level}`;
+      document.getElementById('time-label').textContent=`${data.processing_time_ms}ms`;
+      const fill=document.getElementById('risk-fill');
+      fill.style.width=`${data.risk_score}%`; fill.style.background=getRiskColor(data.risk_score);
+      document.getElementById('score-label').textContent=`${data.risk_score} / 100`;
+      const attackTypes=document.getElementById('attack-types');
+      attackTypes.replaceChildren();
+      if(data.attack_types.length){
+        data.attack_types.forEach(t=>attackTypes.appendChild(makeBadge(t.replace(/_/g,' '),'badge badge-block')));
+      }else{
+        const safe=document.createElement('span');
+        safe.style.color='var(--safe)';
+        safe.textContent='None detected';
+        attackTypes.appendChild(safe);
+      }
+      replaceChildrenTextList(document.getElementById('reasons-list'),data.reasons,'No suspicious patterns found');
+      document.getElementById('semantic-score').textContent=data.semantic_score.toFixed(3);
+      result.classList.remove('result-hidden');
+    }catch(err){alert('Error: '+err.message);}
+    finally{btn.disabled=false;loader.classList.remove('active');}
+  }
+  document.getElementById('prompt-input').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter')runAnalysis();});
+</script>
+{% endblock %}

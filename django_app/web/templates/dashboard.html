@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard — PromptGuard{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="page-title">Dashboard</div>
+  <div class="page-sub">Live stats for every prompt analysed by the firewall.</div>
+
+  <div class="stats-grid">
+    <div class="stat-card"><div class="stat-num" style="color:var(--text);">{{ total }}</div><div class="stat-label">Total Analysed</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--danger);">{{ blocked }}</div><div class="stat-label">Blocked</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--warn);">{{ warned }}</div><div class="stat-label">Warned</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--safe);">{{ allowed }}</div><div class="stat-label">Allowed</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--danger);">{{ block_pct }}%</div><div class="stat-label">Block Rate</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--accent);">{{ avg_score }}</div><div class="stat-label">Avg Risk Score</div></div>
+  </div>
+
+  <div class="card">
+    <div class="section-title" style="margin-bottom:1rem;">Recent Prompts</div>
+    {% if recent %}
+    <div style="overflow-x:auto;">
+      <table class="log-table">
+        <thead><tr><th>Decision</th><th>Score</th><th>Prompt</th><th>Attack Types</th><th>Time</th></tr></thead>
+        <tbody>
+          {% for log in recent %}
+          <tr>
+            <td>
+              {% if log.decision == 'BLOCK' %}<span class="badge badge-block">BLOCK</span>
+              {% elif log.decision == 'WARN' %}<span class="badge badge-warn">WARN</span>
+              {% else %}<span class="badge badge-allow">ALLOW</span>{% endif %}
+            </td>
+            <td style="color:{% if log.risk_score >= 70 %}var(--danger){% elif log.risk_score >= 30 %}var(--warn){% else %}var(--safe){% endif %};">{{ log.risk_score }}</td>
+            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ log.prompt|truncatechars:60 }}</td>
+            <td style="color:var(--muted);">{% if log.attack_types %}{{ log.attack_types|join:", " }}{% else %}—{% endif %}</td>
+            <td style="color:var(--muted);">{{ log.created_at|date:"H:i:s" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="text-align:center;padding:2rem;font-family:var(--font-mono);font-size:0.85rem;color:var(--muted);">
+      No prompts yet. Go to the <a href="/" style="color:var(--accent);">Analyser</a> and try some!
+    </div>
+    {% endif %}
+  </div>
+</div>
+<script>setTimeout(()=>location.reload(),15000);</script>
+{% endblock %}
