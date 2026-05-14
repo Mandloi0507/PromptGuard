@@ -1,6 +1,8 @@
 import json
 import sys
 import os
+import hashlib
+import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
@@ -50,23 +52,70 @@ def _redact_for_log(value):
     return text
 
 
+def _get_client_ip(request):
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR")
+
+
+def _prompt_hash(prompt):
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+
+def _write_audit_log(
+    request,
+    *,
+    request_id,
+    event_type,
+    prompt,
+    result,
+    llm_name=None,
+    llm_response=None,
+    llm_error=None,
+    forwarded_to_llm=False,
+    proceeded_after_warning=False,
+):
+    return PromptLog.objects.create(
+        request_id=request_id,
+        event_type=event_type,
+        prompt=_redact_for_log(prompt),
+        prompt_length=len(prompt),
+        prompt_hash=_prompt_hash(prompt),
+        decision=result.decision,
+        threat_level=result.threat_level,
+        risk_score=result.risk_score,
+        attack_types=result.attack_types,
+        reasons=result.reasons,
+        semantic_score=result.semantic_score,
+        semantic_attack_type=result.semantic_attack_type,
+        llm_used=llm_name if forwarded_to_llm else None,
+        llm_response=_redact_for_log(llm_response),
+        llm_error=_redact_for_log(llm_error),
+        forwarded_to_llm=forwarded_to_llm,
+        proceeded_after_warning=proceeded_after_warning,
+        client_ip=_get_client_ip(request),
+        user_agent=request.META.get("HTTP_USER_AGENT", "")[:1000],
+        path=request.path,
+        processing_time_ms=result.processing_time_ms,
+    )
+
+
 @require_http_methods(["POST"])
 def analyze(request):
     try:
         body = _read_json_body(request)
         prompt = _clean_prompt(body.get("prompt"))
+        request_id = str(uuid.uuid4())
 
         result = firewall.analyze(prompt)
 
-        PromptLog.objects.create(
-            prompt=_redact_for_log(prompt),
-            decision=result.decision,
-            threat_level=result.threat_level,
-            risk_score=result.risk_score,
-            attack_types=result.attack_types,
-            reasons=result.reasons,
-            semantic_score=result.semantic_score,
-            processing_time_ms=result.processing_time_ms,
+        _write_audit_log(
+            request,
+            request_id=request_id,
+            event_type=PromptLog.EVENT_ANALYZE,
+            prompt=prompt,
+            result=result,
         )
 
         return JsonResponse({
@@ -92,6 +141,7 @@ def firewall_view(request):
     try:
         body = _read_json_body(request)
         prompt = _clean_prompt(body.get("prompt"))
+        request_id = str(uuid.uuid4())
         llm_name = str(body.get("llm", "ollama")).strip().lower()
         api_key = body.get("api_key", None)
         proceed_on_warn = bool(body.get("proceed_on_warn", False))
@@ -115,17 +165,24 @@ def firewall_view(request):
             except Exception as e:
                 llm_error = str(e)
 
-        PromptLog.objects.create(
-            prompt=_redact_for_log(prompt),
-            decision=result.decision,
-            threat_level=result.threat_level,
-            risk_score=result.risk_score,
-            attack_types=result.attack_types,
-            reasons=result.reasons,
-            semantic_score=result.semantic_score,
-            llm_used=llm_name if should_forward else None,
-            llm_response=_redact_for_log(llm_response),
-            processing_time_ms=result.processing_time_ms,
+        if llm_error:
+            event_type = PromptLog.EVENT_LLM_ERROR
+        elif should_forward:
+            event_type = PromptLog.EVENT_LLM_FORWARD
+        else:
+            event_type = PromptLog.EVENT_FIREWALL
+
+        _write_audit_log(
+            request,
+            request_id=request_id,
+            event_type=event_type,
+            prompt=prompt,
+            result=result,
+            llm_name=llm_name,
+            llm_response=llm_response,
+            llm_error=llm_error,
+            forwarded_to_llm=should_forward and llm_error is None,
+            proceeded_after_warning=result.decision == "WARN" and should_forward,
         )
 
         response_data = {

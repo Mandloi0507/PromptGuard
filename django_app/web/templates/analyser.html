@@ -1,61 +1,118 @@
 {% extends 'base.html' %}
-{% block title %}Analyser — PromptGuard{% endblock %}
+{% block title %}Analyser - PromptGuard{% endblock %}
+{% block topbar_title %}Prompt Analyser{% endblock %}
 {% block nav_analyser %}active{% endblock %}
 {% block content %}
 <div class="page">
-  <div class="page-title">Prompt Analyser</div>
-  <div class="page-sub">Paste any prompt to scan it for injection attacks.</div>
-
-  <div class="card">
-    <label for="prompt-input">Prompt to analyse</label>
-    <textarea id="prompt-input" rows="5" placeholder="Type or paste any prompt here..."></textarea>
-    <div style="margin-top:1rem;display:flex;align-items:center;gap:1rem;">
-      <button class="btn btn-primary" id="analyse-btn" onclick="runAnalysis()">Analyse</button>
-      <div class="loader" id="loader">
-        <div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div>
-        <span>Scanning...</span>
-      </div>
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Prompt Analyser</h1>
+      <p class="page-sub">Scan a prompt before it reaches any model. Results are written to the audit trail.</p>
+    </div>
+    <div class="status-row">
+      <span class="chip">Pattern scan</span>
+      <span class="chip">Semantic scan</span>
+      <span class="chip">Risk scoring</span>
     </div>
   </div>
 
-  <div class="card result-hidden" id="result-card">
-    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;">
-      <span id="decision-badge" class="badge"></span>
-      <span id="threat-label" style="font-family:var(--font-mono);font-size:0.8rem;color:var(--muted);"></span>
-      <span style="margin-left:auto;font-family:var(--font-mono);font-size:0.75rem;color:var(--muted);" id="time-label"></span>
+  <div class="grid-2">
+    <section class="panel">
+      <div class="panel-head">
+        <h2 class="section-title">Prompt Input</h2>
+        <span class="chip" id="prompt-count">0 chars</span>
+      </div>
+      <label for="prompt-input">Prompt to analyse</label>
+      <textarea id="prompt-input" rows="6" placeholder="Paste a prompt for firewall inspection..." oninput="updateCounter('prompt-input','prompt-count')"></textarea>
+      <div class="field-meta">
+        <span>Ctrl + Enter to analyse</span>
+        <span>Max request size enforced by API</span>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="analyse-btn" onclick="runAnalysis()">Analyse Prompt</button>
+        <button class="btn btn-secondary" onclick="clearAnalysis()">Clear</button>
+        <div class="loader" id="loader">
+          <div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div>
+          <span>Scanning</span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <h2 class="section-title">Decision Policy</h2>
+      <div class="drawer-row">
+        <div class="drawer-key safe">ALLOW</div>
+        <div class="drawer-value muted">Low-risk prompts can continue.</div>
+      </div>
+      <div class="drawer-row">
+        <div class="drawer-key warn">WARN</div>
+        <div class="drawer-value muted">Medium-risk prompts need human review.</div>
+      </div>
+      <div class="drawer-row">
+        <div class="drawer-key danger">BLOCK</div>
+        <div class="drawer-value muted">High-risk prompts are stopped before model access.</div>
+      </div>
+    </aside>
+  </div>
+
+  <section class="panel result-panel result-hidden" id="result-card">
+    <div class="result-head">
+      <div class="decision-group">
+        <span id="decision-badge" class="badge"></span>
+        <span id="threat-label" class="chip"></span>
+        <span id="time-label" class="chip"></span>
+      </div>
+      <span id="semantic-score" class="chip">Semantic 0.000</span>
     </div>
-    <div class="section-title">Risk Score</div>
+
+    <div class="metric-grid">
+      <div class="metric">
+        <div class="metric-label">Risk Score</div>
+        <div class="metric-value" id="score-label">0 / 100</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Threat Level</div>
+        <div class="metric-value" id="threat-metric">LOW</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Attack Types</div>
+        <div class="metric-value" id="attack-count">0</div>
+      </div>
+    </div>
+
     <div class="risk-bar-wrap">
-      <div class="risk-bar-label">
-        <span>0 — Safe</span><span id="score-label">0 / 100</span><span>100 — Critical</span>
-      </div>
-      <div class="risk-bar-track">
-        <div class="risk-bar-fill" id="risk-fill" style="width:0%"></div>
-      </div>
+      <div class="risk-bar-label"><span>Safe</span><span>Warn</span><span>Block</span></div>
+      <div class="risk-bar-track"><div class="risk-bar-fill" id="risk-fill"></div></div>
     </div>
-    <div style="margin-top:1.25rem;">
-      <div class="section-title">Attack Types Detected</div>
-      <div id="attack-types"></div>
+
+    <div style="margin-top:1rem;">
+      <h2 class="section-title">Attack Types Detected</h2>
+      <div class="status-row" id="attack-types"></div>
     </div>
-    <div style="margin-top:1.25rem;">
-      <div class="section-title">Why was this flagged?</div>
+
+    <div style="margin-top:1rem;">
+      <h2 class="section-title">Reasons</h2>
       <ul class="reasons" id="reasons-list"></ul>
     </div>
-    <div style="margin-top:1rem;font-family:var(--font-mono);font-size:0.75rem;color:var(--muted);">
-      Semantic score: <span id="semantic-score">—</span>
-    </div>
-  </div>
+  </section>
 </div>
 <script>
-  function getRiskColor(s){return s>=70?'var(--danger)':s>=30?'var(--warn)':'var(--safe)';}
   function getBadgeClass(d){return d==='BLOCK'?'badge-block':d==='WARN'?'badge-warn':'badge-allow';}
+  function getPanelClass(d){return d==='BLOCK'?'block':d==='WARN'?'warn':'allow';}
+  function clearAnalysis(){
+    document.getElementById('prompt-input').value='';
+    updateCounter('prompt-input','prompt-count');
+    document.getElementById('result-card').classList.add('result-hidden');
+  }
   async function runAnalysis(){
     const prompt=document.getElementById('prompt-input').value.trim();
     if(!prompt)return;
     const btn=document.getElementById('analyse-btn');
     const loader=document.getElementById('loader');
     const result=document.getElementById('result-card');
-    btn.disabled=true; loader.classList.add('active'); result.classList.add('result-hidden');
+    btn.disabled=true;
+    loader.classList.add('active');
+    result.classList.add('result-hidden');
     try{
       const res=await fetch('/api/analyze',{
         method:'POST',
@@ -64,28 +121,33 @@
       });
       const data=await res.json();
       if(!res.ok)throw new Error(data.error||'Analysis failed');
+
+      result.className=`panel result-panel ${getPanelClass(data.decision)}`;
       const badge=document.getElementById('decision-badge');
-      badge.textContent=data.decision; badge.className=`badge ${getBadgeClass(data.decision)}`;
-      document.getElementById('threat-label').textContent=`Threat Level: ${data.threat_level}`;
+      badge.textContent=data.decision;
+      badge.className=`badge ${getBadgeClass(data.decision)}`;
+      document.getElementById('threat-label').textContent=`Threat ${data.threat_level}`;
       document.getElementById('time-label').textContent=`${data.processing_time_ms}ms`;
-      const fill=document.getElementById('risk-fill');
-      fill.style.width=`${data.risk_score}%`; fill.style.background=getRiskColor(data.risk_score);
+      document.getElementById('semantic-score').textContent=`Semantic ${data.semantic_score.toFixed(3)}`;
       document.getElementById('score-label').textContent=`${data.risk_score} / 100`;
+      document.getElementById('threat-metric').textContent=data.threat_level;
+      document.getElementById('attack-count').textContent=data.attack_types.length;
+      document.getElementById('risk-fill').style.width=`${data.risk_score}%`;
+
       const attackTypes=document.getElementById('attack-types');
       attackTypes.replaceChildren();
       if(data.attack_types.length){
         data.attack_types.forEach(t=>attackTypes.appendChild(makeBadge(t.replace(/_/g,' '),'badge badge-block')));
       }else{
-        const safe=document.createElement('span');
-        safe.style.color='var(--safe)';
-        safe.textContent='None detected';
-        attackTypes.appendChild(safe);
+        attackTypes.appendChild(makeBadge('None detected','badge badge-allow'));
       }
       replaceChildrenTextList(document.getElementById('reasons-list'),data.reasons,'No suspicious patterns found');
-      document.getElementById('semantic-score').textContent=data.semantic_score.toFixed(3);
-      result.classList.remove('result-hidden');
-    }catch(err){alert('Error: '+err.message);}
-    finally{btn.disabled=false;loader.classList.remove('active');}
+    }catch(err){
+      alert('Error: '+err.message);
+    }finally{
+      btn.disabled=false;
+      loader.classList.remove('active');
+    }
   }
   document.getElementById('prompt-input').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter')runAnalysis();});
 </script>

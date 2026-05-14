@@ -1,49 +1,186 @@
 {% extends 'base.html' %}
-{% block title %}Dashboard — PromptGuard{% endblock %}
+{% block title %}Audit Logs - PromptGuard{% endblock %}
+{% block topbar_title %}Audit Logs{% endblock %}
 {% block nav_dashboard %}active{% endblock %}
 {% block content %}
 <div class="page">
-  <div class="page-title">Dashboard</div>
-  <div class="page-sub">Live stats for every prompt analysed by the firewall.</div>
-
-  <div class="stats-grid">
-    <div class="stat-card"><div class="stat-num" style="color:var(--text);">{{ total }}</div><div class="stat-label">Total Analysed</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--danger);">{{ blocked }}</div><div class="stat-label">Blocked</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--warn);">{{ warned }}</div><div class="stat-label">Warned</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--safe);">{{ allowed }}</div><div class="stat-label">Allowed</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--danger);">{{ block_pct }}%</div><div class="stat-label">Block Rate</div></div>
-    <div class="stat-card"><div class="stat-num" style="color:var(--accent);">{{ avg_score }}</div><div class="stat-label">Avg Risk Score</div></div>
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">Audit Logs</h1>
+      <p class="page-sub">Review firewall decisions, forwarded prompts, warning overrides, and adapter errors.</p>
+    </div>
+    <div class="status-row">
+      <span class="chip">Auto-refresh 15s</span>
+      <span class="chip">SQLite audit store</span>
+    </div>
   </div>
 
-  <div class="card">
-    <div class="section-title" style="margin-bottom:1rem;">Recent Prompts</div>
+  <div class="stats-grid">
+    <div class="stat-card"><div class="stat-label">Total Audits</div><div class="stat-num">{{ total }}</div></div>
+    <div class="stat-card"><div class="stat-label">Blocked</div><div class="stat-num danger">{{ blocked }}</div></div>
+    <div class="stat-card"><div class="stat-label">Warned</div><div class="stat-num warn">{{ warned }}</div></div>
+    <div class="stat-card"><div class="stat-label">Allowed</div><div class="stat-num safe">{{ allowed }}</div></div>
+    <div class="stat-card"><div class="stat-label">Forwarded</div><div class="stat-num">{{ forwarded }}</div></div>
+    <div class="stat-card"><div class="stat-label">Warn Overrides</div><div class="stat-num warn">{{ overrides }}</div></div>
+    <div class="stat-card"><div class="stat-label">LLM Errors</div><div class="stat-num danger">{{ llm_errors }}</div></div>
+    <div class="stat-card"><div class="stat-label">Block Rate</div><div class="stat-num danger">{{ block_pct }}%</div></div>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="section-title">Recent Audit Records</h2>
+      <span class="chip"><span id="visible-count">{{ recent|length }}</span> visible</span>
+    </div>
+
+    <div class="filter-row">
+      <div>
+        <label for="decision-filter">Decision</label>
+        <select id="decision-filter" onchange="filterAuditRows()">
+          <option value="">All decisions</option>
+          <option value="ALLOW">Allow</option>
+          <option value="WARN">Warn</option>
+          <option value="BLOCK">Block</option>
+        </select>
+      </div>
+      <div>
+        <label for="event-filter">Event</label>
+        <select id="event-filter" onchange="filterAuditRows()">
+          <option value="">All events</option>
+          <option value="ANALYZE">Analyze</option>
+          <option value="FIREWALL">Firewall</option>
+          <option value="LLM_FORWARD">Forwarded</option>
+          <option value="LLM_ERROR">LLM Error</option>
+        </select>
+      </div>
+      <div>
+        <label for="flow-filter">Flow</label>
+        <select id="flow-filter" onchange="filterAuditRows()">
+          <option value="">All flows</option>
+          <option value="forwarded">Forwarded</option>
+          <option value="held">Held</option>
+          <option value="override">Warning override</option>
+          <option value="error">Adapter error</option>
+        </select>
+      </div>
+      <div>
+        <label for="audit-search">Search</label>
+        <input id="audit-search" type="text" placeholder="Prompt, model, attack type" oninput="filterAuditRows()"/>
+      </div>
+    </div>
+
     {% if recent %}
-    <div style="overflow-x:auto;">
+    <div class="table-wrap">
       <table class="log-table">
-        <thead><tr><th>Decision</th><th>Score</th><th>Prompt</th><th>Attack Types</th><th>Time</th></tr></thead>
-        <tbody>
+        <thead>
+          <tr><th>Event</th><th>Decision</th><th>Score</th><th>Prompt</th><th>Flow</th><th>Time</th></tr>
+        </thead>
+        <tbody id="audit-body">
           {% for log in recent %}
-          <tr>
+          <tr class="audit-row"
+              data-decision="{{ log.decision }}"
+              data-event="{{ log.event_type }}"
+              data-forwarded="{% if log.forwarded_to_llm %}true{% else %}false{% endif %}"
+              data-override="{% if log.proceeded_after_warning %}true{% else %}false{% endif %}"
+              data-error="{% if log.llm_error %}true{% else %}false{% endif %}"
+              data-prompt="{{ log.prompt|escape }}"
+              data-model="{{ log.llm_used|default:'-' }}"
+              data-attacks="{% if log.attack_types %}{{ log.attack_types|join:', '|escape }}{% else %}None{% endif %}"
+              data-reasons="{% if log.reasons %}{{ log.reasons|join:' | '|escape }}{% else %}No reasons recorded{% endif %}"
+              data-request="{{ log.request_id|default:'-' }}"
+              data-hash="{{ log.prompt_hash|default:'-' }}"
+              data-ip="{{ log.client_ip|default:'-' }}"
+              data-agent="{{ log.user_agent|default:'-'|escape }}"
+              data-length="{{ log.prompt_length }}"
+              data-semantic="{{ log.semantic_score|floatformat:3 }}"
+              data-path="{{ log.path|default:'-' }}">
+            <td>{{ log.event_type }}</td>
             <td>
               {% if log.decision == 'BLOCK' %}<span class="badge badge-block">BLOCK</span>
               {% elif log.decision == 'WARN' %}<span class="badge badge-warn">WARN</span>
               {% else %}<span class="badge badge-allow">ALLOW</span>{% endif %}
             </td>
-            <td style="color:{% if log.risk_score >= 70 %}var(--danger){% elif log.risk_score >= 30 %}var(--warn){% else %}var(--safe){% endif %};">{{ log.risk_score }}</td>
-            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ log.prompt|truncatechars:60 }}</td>
-            <td style="color:var(--muted);">{% if log.attack_types %}{{ log.attack_types|join:", " }}{% else %}—{% endif %}</td>
-            <td style="color:var(--muted);">{{ log.created_at|date:"H:i:s" }}</td>
+            <td class="{% if log.risk_score >= 70 %}danger{% elif log.risk_score >= 30 %}warn{% else %}safe{% endif %}">{{ log.risk_score }}</td>
+            <td>
+              <button class="row-button" onclick="openAuditDrawer(this.closest('tr'))">{{ log.prompt|truncatechars:70 }}</button>
+            </td>
+            <td>
+              {% if log.forwarded_to_llm %}<span class="safe">forwarded</span>{% else %}<span class="muted">held</span>{% endif %}
+              {% if log.proceeded_after_warning %}<span class="warn"> | override</span>{% endif %}
+              {% if log.llm_error %}<span class="danger"> | error</span>{% endif %}
+              {% if log.llm_used %}<span class="muted"> | {{ log.llm_used }}</span>{% endif %}
+            </td>
+            <td class="muted">{{ log.created_at|date:"H:i:s" }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     {% else %}
-    <div style="text-align:center;padding:2rem;font-family:var(--font-mono);font-size:0.85rem;color:var(--muted);">
-      No prompts yet. Go to the <a href="/" style="color:var(--accent);">Analyser</a> and try some!
-    </div>
+    <div class="muted" style="padding:2rem;text-align:center;font-family:var(--font-mono);">No audit records yet.</div>
     {% endif %}
-  </div>
+  </section>
 </div>
-<script>setTimeout(()=>location.reload(),15000);</script>
+
+<aside class="drawer" id="audit-drawer" aria-hidden="true">
+  <div class="panel-head">
+    <h2 class="section-title">Audit Record</h2>
+    <button class="btn btn-secondary" onclick="closeAuditDrawer()">Close</button>
+  </div>
+  <div class="drawer-row"><div class="drawer-key">Prompt</div><div class="drawer-value" id="drawer-prompt">-</div></div>
+  <div class="drawer-row"><div class="drawer-key">Decision</div><div class="drawer-value" id="drawer-decision">-</div></div>
+  <div class="drawer-row"><div class="drawer-key">Event / Model</div><div class="drawer-value" id="drawer-event">-</div></div>
+  <div class="drawer-row"><div class="drawer-key">Attacks</div><div class="drawer-value" id="drawer-attacks">-</div></div>
+  <div class="drawer-row"><div class="drawer-key">Reasons</div><div class="drawer-value" id="drawer-reasons">-</div></div>
+  <div class="drawer-row"><div class="drawer-key">Request ID</div><div class="drawer-value" id="drawer-request">-</div></div>
+  <div class="drawer-row"><div class="drawer-key">Prompt Hash</div><div class="drawer-value" id="drawer-hash">-</div></div>
+  <div class="drawer-row"><div class="drawer-key">Client</div><div class="drawer-value" id="drawer-client">-</div></div>
+</aside>
+
+<script>
+  function rowMatchesFlow(row,flow){
+    if(!flow)return true;
+    if(flow==='forwarded')return row.dataset.forwarded==='true';
+    if(flow==='held')return row.dataset.forwarded==='false';
+    if(flow==='override')return row.dataset.override==='true';
+    if(flow==='error')return row.dataset.error==='true';
+    return true;
+  }
+  function filterAuditRows(){
+    const decision=document.getElementById('decision-filter').value;
+    const event=document.getElementById('event-filter').value;
+    const flow=document.getElementById('flow-filter').value;
+    const query=document.getElementById('audit-search').value.trim().toLowerCase();
+    let visible=0;
+    document.querySelectorAll('.audit-row').forEach(row=>{
+      const haystack=[row.dataset.prompt,row.dataset.model,row.dataset.attacks,row.dataset.reasons,row.dataset.request].join(' ').toLowerCase();
+      const matchDecision=!decision || row.dataset.decision===decision;
+      const matchEvent=!event || row.dataset.event===event;
+      const matchFlow=rowMatchesFlow(row,flow);
+      const matchQuery=!query || haystack.includes(query);
+      const show=matchDecision && matchEvent && matchFlow && matchQuery;
+      row.style.display=show?'':'none';
+      if(show)visible+=1;
+    });
+    document.getElementById('visible-count').textContent=visible;
+  }
+  function openAuditDrawer(row){
+    document.getElementById('drawer-prompt').textContent=row.dataset.prompt || '-';
+    document.getElementById('drawer-decision').textContent=`${row.dataset.decision} | score ${row.children[2].textContent} | semantic ${row.dataset.semantic}`;
+    document.getElementById('drawer-event').textContent=`${row.dataset.event} | model ${row.dataset.model} | path ${row.dataset.path}`;
+    document.getElementById('drawer-attacks').textContent=row.dataset.attacks || 'None';
+    document.getElementById('drawer-reasons').textContent=row.dataset.reasons || 'No reasons recorded';
+    document.getElementById('drawer-request').textContent=row.dataset.request || '-';
+    document.getElementById('drawer-hash').textContent=row.dataset.hash || '-';
+    document.getElementById('drawer-client').textContent=`IP ${row.dataset.ip || '-'} | ${row.dataset.length || 0} chars | ${row.dataset.agent || '-'}`;
+    const drawer=document.getElementById('audit-drawer');
+    drawer.classList.add('open');
+    drawer.setAttribute('aria-hidden','false');
+  }
+  function closeAuditDrawer(){
+    const drawer=document.getElementById('audit-drawer');
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden','true');
+  }
+  setTimeout(()=>location.reload(),15000);
+</script>
 {% endblock %}
