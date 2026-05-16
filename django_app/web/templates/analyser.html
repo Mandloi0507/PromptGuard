@@ -10,9 +10,8 @@
       <p class="page-sub">Scan a prompt before it reaches any model. Results are written to the audit trail.</p>
     </div>
     <div class="status-row">
-      <span class="chip">Pattern scan</span>
-      <span class="chip">Semantic scan</span>
-      <span class="chip">Risk scoring</span>
+      <span class="chip">🤖 Gemini AI Analysis</span>
+      <span class="chip">Generative Detection</span>
     </div>
   </div>
 
@@ -33,7 +32,7 @@
         <button class="btn btn-secondary" onclick="clearAnalysis()">Clear</button>
         <div class="loader" id="loader">
           <div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div>
-          <span>Scanning</span>
+          <span>AI Analysing</span>
         </div>
       </div>
     </section>
@@ -52,6 +51,10 @@
         <div class="drawer-key danger">BLOCK</div>
         <div class="drawer-value muted">High-risk prompts are stopped before model access.</div>
       </div>
+      <div class="drawer-row" style="margin-top:1rem;">
+        <div class="drawer-key">Engine</div>
+        <div class="drawer-value muted">Powered by Gemini AI — generative prompt injection detection.</div>
+      </div>
     </aside>
   </div>
 
@@ -62,7 +65,6 @@
         <span id="threat-label" class="chip"></span>
         <span id="time-label" class="chip"></span>
       </div>
-      <span id="semantic-score" class="chip">Semantic 0.000</span>
     </div>
 
     <div class="metric-grid">
@@ -91,7 +93,7 @@
     </div>
 
     <div style="margin-top:1rem;">
-      <h2 class="section-title">Reasons</h2>
+      <h2 class="section-title">AI Reasoning</h2>
       <ul class="reasons" id="reasons-list"></ul>
     </div>
   </section>
@@ -128,7 +130,6 @@
       badge.className=`badge ${getBadgeClass(data.decision)}`;
       document.getElementById('threat-label').textContent=`Threat ${data.threat_level}`;
       document.getElementById('time-label').textContent=`${data.processing_time_ms}ms`;
-      document.getElementById('semantic-score').textContent=`Semantic ${data.semantic_score.toFixed(3)}`;
       document.getElementById('score-label').textContent=`${data.risk_score} / 100`;
       document.getElementById('threat-metric').textContent=data.threat_level;
       document.getElementById('attack-count').textContent=data.attack_types.length;
@@ -141,7 +142,7 @@
       }else{
         attackTypes.appendChild(makeBadge('None detected','badge badge-allow'));
       }
-      replaceChildrenTextList(document.getElementById('reasons-list'),data.reasons,'No suspicious patterns found');
+      replaceChildrenTextList(document.getElementById('reasons-list'),data.reasons,'No threats detected — prompt is safe');
     }catch(err){
       alert('Error: '+err.message);
     }finally{

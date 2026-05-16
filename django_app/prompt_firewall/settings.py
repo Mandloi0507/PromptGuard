@@ -13,6 +13,16 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 import os
 
+# --- Load .env file (keeps secrets out of source code) ---
+_env_path = Path(__file__).resolve().parent.parent / '.env'
+if _env_path.exists():
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _key, _, _val = _line.partition('=')
+                os.environ.setdefault(_key.strip(), _val.strip().strip('"').strip("'"))
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -136,3 +146,8 @@ SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
+
+# PromptGuard — Gemini API key for generative analysis
+# Reads from .env file or environment variable (never hardcode keys here)
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', os.environ.get('GOOGLE_API_KEY', ''))
+

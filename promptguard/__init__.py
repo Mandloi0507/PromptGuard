@@ -6,20 +6,17 @@
 #
 # Usage:
 #   from promptguard import Firewall
-#   fw = Firewall()
+#   fw = Firewall(api_key="YOUR_GEMINI_KEY")
 #   result = fw.analyze("Ignore previous instructions")
 #   print(result.decision)    # 'BLOCK'
-#   print(result.risk_score)  # 91
+#   print(result.risk_score)  # 85
 # ============================================================
 
 import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .patterns import scan_patterns
-from .semantic import get_semantic_score
-from .scorer import calculate_risk_score, generate_reasons
-from .decision import make_decision
+from .analyzer import generative_analyze
 
 
 @dataclass
@@ -33,10 +30,8 @@ class FirewallResult:
     threat_level: str         # 'LOW', 'MEDIUM', or 'HIGH'
     risk_score: int           # 0–100
     attack_types: list        # e.g. ['instruction_override', 'data_exfiltration']
-    reasons: list             # plain-English explanation list
-    pattern_hits: dict        # raw Layer 1 output (attack_type -> matched phrases)
-    semantic_score: float     # raw Layer 2 output (0.0–1.0)
-    semantic_attack_type: Optional[str]  # which category had highest semantic match
+    reasons: list             # plain-English explanation list from the AI
+    ai_reasoning: str         # full AI reasoning as a single string
     processing_time_ms: float  # how long the analysis took
 
     def is_safe(self) -> bool:
@@ -49,7 +44,7 @@ class FirewallResult:
             f"Threat Level:  {self.threat_level}",
             f"Risk Score:    {self.risk_score} / 100",
             f"Attack Types:  {', '.join(self.attack_types) if self.attack_types else 'None'}",
-            f"Reasons:",
+            f"AI Reasoning:",
         ]
         if self.reasons:
             for r in self.reasons:
@@ -64,28 +59,29 @@ class Firewall:
     """
     The main entry point for the promptguard library.
 
-    Runs all three detection layers on a prompt and returns
-    a structured FirewallResult object.
+    Uses the Gemini LLM to analyze prompts for injection attacks
+    and returns a structured FirewallResult object.
 
     Example:
-        fw = Firewall()
+        fw = Firewall(api_key="YOUR_GEMINI_KEY")
         result = fw.analyze("Ignore all previous instructions")
         if not result.is_safe():
             print("Attack blocked:", result.reasons)
     """
 
-    def __init__(self, use_semantic: bool = True):
+    def __init__(self, api_key: str = None, model: str = "gemini-2.5-flash"):
         """
         Args:
-            use_semantic: If True (default), runs Layer 2 semantic analysis.
-                          Set to False for faster but less thorough detection
-                          (Layer 1 pattern matching only).
+            api_key: Gemini API key. If not provided, falls back to
+                     GEMINI_API_KEY or GOOGLE_API_KEY environment variables.
+            model:   Gemini model to use (default: gemini-2.5-flash).
         """
-        self.use_semantic = use_semantic
+        self.api_key = api_key
+        self.model = model
 
     def analyze(self, prompt: str) -> FirewallResult:
         """
-        Analyse a prompt through all detection layers.
+        Analyse a prompt using generative AI detection.
 
         Args:
             prompt: The user's input string to evaluate.
@@ -95,42 +91,25 @@ class Firewall:
         """
         start_time = time.time()
 
-        # --- Layer 1: Pattern Detection ---
-        pattern_hits = scan_patterns(prompt)
-
-        # --- Layer 2: Semantic Analysis ---
-        semantic_score = 0.0
-        semantic_attack_type = None
-
-        if self.use_semantic:
-            semantic_score, semantic_attack_type = get_semantic_score(prompt)
-
-        # --- Layer 3: Risk Scoring ---
-        risk_score = calculate_risk_score(pattern_hits, semantic_score)
-        reasons = generate_reasons(pattern_hits, semantic_score)
-
-        # --- Decision ---
-        decision, threat_level = make_decision(risk_score)
-
-        # Collect all detected attack types
-        attack_types = list(pattern_hits.keys())
-        if (
-            semantic_attack_type
-            and semantic_score >= 0.60
-            and semantic_attack_type not in attack_types
-        ):
-            attack_types.append(semantic_attack_type)
+        # --- Generative AI Analysis ---
+        result = generative_analyze(
+            prompt=prompt,
+            api_key=self.api_key,
+            model=self.model,
+        )
 
         elapsed_ms = (time.time() - start_time) * 1000
 
+        # Build the ai_reasoning string from the list
+        reasoning_list = result.get("reasoning", [])
+        ai_reasoning_str = " | ".join(reasoning_list) if reasoning_list else "No analysis available"
+
         return FirewallResult(
-            decision=decision,
-            threat_level=threat_level,
-            risk_score=risk_score,
-            attack_types=attack_types,
-            reasons=reasons,
-            pattern_hits=pattern_hits,
-            semantic_score=semantic_score,
-            semantic_attack_type=semantic_attack_type,
+            decision=result["decision"],
+            threat_level=result["threat_level"],
+            risk_score=result["risk_score"],
+            attack_types=result["attack_types"],
+            reasons=reasoning_list,
+            ai_reasoning=ai_reasoning_str,
             processing_time_ms=elapsed_ms,
         )

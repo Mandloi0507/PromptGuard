@@ -1,5 +1,7 @@
 """
-Quick smoke test of the promptguard library.
+Quick smoke test of the promptguard library (Generative AI engine).
+
+Requires GEMINI_API_KEY environment variable to be set.
 """
 
 from promptguard import Firewall
@@ -35,7 +37,7 @@ test_cases = [
 ]
 
 print("=" * 60)
-print("  promptguard - Detection Engine Test")
+print("  promptguard - Generative AI Detection Engine Test")
 print("=" * 60)
 
 all_passed = True
@@ -49,6 +51,7 @@ for case in test_cases:
     passed = result.decision == case["expected_decision"]
     status = "PASSED" if passed else "FAILED"
     print(f"\nTest: {status} (expected {case['expected_decision']}, got {result.decision})")
+    print(f"AI Reasoning: {result.ai_reasoning}")
     print("-" * 60)
 
     if not passed:

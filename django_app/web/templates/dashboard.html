@@ -86,12 +86,12 @@
               data-model="{{ log.llm_used|default:'-' }}"
               data-attacks="{% if log.attack_types %}{{ log.attack_types|join:', '|escape }}{% else %}None{% endif %}"
               data-reasons="{% if log.reasons %}{{ log.reasons|join:' | '|escape }}{% else %}No reasons recorded{% endif %}"
+              data-ai-reasoning="{{ log.ai_reasoning|default:'-'|escape }}"
               data-request="{{ log.request_id|default:'-' }}"
               data-hash="{{ log.prompt_hash|default:'-' }}"
               data-ip="{{ log.client_ip|default:'-' }}"
               data-agent="{{ log.user_agent|default:'-'|escape }}"
               data-length="{{ log.prompt_length }}"
-              data-semantic="{{ log.semantic_score|floatformat:3 }}"
               data-path="{{ log.path|default:'-' }}">
             <td>{{ log.event_type }}</td>
             <td>
@@ -130,7 +130,7 @@
   <div class="drawer-row"><div class="drawer-key">Decision</div><div class="drawer-value" id="drawer-decision">-</div></div>
   <div class="drawer-row"><div class="drawer-key">Event / Model</div><div class="drawer-value" id="drawer-event">-</div></div>
   <div class="drawer-row"><div class="drawer-key">Attacks</div><div class="drawer-value" id="drawer-attacks">-</div></div>
-  <div class="drawer-row"><div class="drawer-key">Reasons</div><div class="drawer-value" id="drawer-reasons">-</div></div>
+  <div class="drawer-row"><div class="drawer-key">AI Reasoning</div><div class="drawer-value" id="drawer-reasoning">-</div></div>
   <div class="drawer-row"><div class="drawer-key">Request ID</div><div class="drawer-value" id="drawer-request">-</div></div>
   <div class="drawer-row"><div class="drawer-key">Prompt Hash</div><div class="drawer-value" id="drawer-hash">-</div></div>
   <div class="drawer-row"><div class="drawer-key">Client</div><div class="drawer-value" id="drawer-client">-</div></div>
@@ -165,10 +165,10 @@
   }
   function openAuditDrawer(row){
     document.getElementById('drawer-prompt').textContent=row.dataset.prompt || '-';
-    document.getElementById('drawer-decision').textContent=`${row.dataset.decision} | score ${row.children[2].textContent} | semantic ${row.dataset.semantic}`;
+    document.getElementById('drawer-decision').textContent=`${row.dataset.decision} | score ${row.children[2].textContent}`;
     document.getElementById('drawer-event').textContent=`${row.dataset.event} | model ${row.dataset.model} | path ${row.dataset.path}`;
     document.getElementById('drawer-attacks').textContent=row.dataset.attacks || 'None';
-    document.getElementById('drawer-reasons').textContent=row.dataset.reasons || 'No reasons recorded';
+    document.getElementById('drawer-reasoning').textContent=row.dataset.aiReasoning || row.dataset.reasons || 'No reasoning recorded';
     document.getElementById('drawer-request').textContent=row.dataset.request || '-';
     document.getElementById('drawer-hash').textContent=row.dataset.hash || '-';
     document.getElementById('drawer-client').textContent=`IP ${row.dataset.ip || '-'} | ${row.dataset.length || 0} chars | ${row.dataset.agent || '-'}`;

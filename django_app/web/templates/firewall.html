@@ -51,7 +51,7 @@
         <button class="btn btn-secondary" onclick="clearFirewall()">Clear</button>
         <div class="loader" id="fw-loader">
           <div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div>
-          <span id="fw-loader-text">Scanning</span>
+          <span id="fw-loader-text">AI Analysing</span>
         </div>
       </div>
     </section>
@@ -67,6 +67,10 @@
       <div class="drawer-row">
         <div class="drawer-key">Current Behavior</div>
         <div class="drawer-value muted">Warnings pause the request and expose Send Anyway. Blocks are final.</div>
+      </div>
+      <div class="drawer-row">
+        <div class="drawer-key">Engine</div>
+        <div class="drawer-value muted">Powered by Gemini AI — generative prompt injection detection.</div>
       </div>
     </aside>
   </div>
@@ -110,7 +114,7 @@
     </div>
 
     <div style="margin-top:1rem;">
-      <h2 class="section-title">Reasons</h2>
+      <h2 class="section-title">AI Reasoning</h2>
       <ul class="reasons" id="fw-reasons"></ul>
     </div>
 
@@ -167,7 +171,7 @@
     }else{
       attackTypes.appendChild(makeBadge('None detected','badge badge-allow'));
     }
-    replaceChildrenTextList(document.getElementById('fw-reasons'),data.reasons,'No suspicious patterns found');
+    replaceChildrenTextList(document.getElementById('fw-reasons'),data.reasons,'No threats detected — prompt is safe');
     setWarnActionsVisible(data.decision==='WARN' && !data.proceeded_after_warning);
 
     const responseWrap=document.getElementById('llm-response-wrap');

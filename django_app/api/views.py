@@ -14,7 +14,7 @@ from promptguard import Firewall
 from promptguard.adapters import get_adapter
 from .models import PromptLog
 
-firewall = Firewall()
+firewall = Firewall(api_key=getattr(settings, 'GEMINI_API_KEY', None))
 MAX_PROMPT_CHARS = 8000
 MAX_LOG_CHARS = 1000
 ALLOWED_LLMS = {"ollama", "claude", "anthropic", "openai", "gpt", "gemini", "google"}
@@ -87,8 +87,7 @@ def _write_audit_log(
         risk_score=result.risk_score,
         attack_types=result.attack_types,
         reasons=result.reasons,
-        semantic_score=result.semantic_score,
-        semantic_attack_type=result.semantic_attack_type,
+        ai_reasoning=result.ai_reasoning,
         llm_used=llm_name if forwarded_to_llm else None,
         llm_response=_redact_for_log(llm_response),
         llm_error=_redact_for_log(llm_error),
@@ -124,7 +123,7 @@ def analyze(request):
             "risk_score": result.risk_score,
             "attack_types": result.attack_types,
             "reasons": result.reasons,
-            "semantic_score": round(result.semantic_score, 3),
+            "ai_reasoning": result.ai_reasoning,
             "processing_time_ms": round(result.processing_time_ms, 1),
         })
 
@@ -191,7 +190,7 @@ def firewall_view(request):
             "risk_score": result.risk_score,
             "attack_types": result.attack_types,
             "reasons": result.reasons,
-            "semantic_score": round(result.semantic_score, 3),
+            "ai_reasoning": result.ai_reasoning,
             "llm_used": llm_name if should_forward else None,
             "llm_response": llm_response,
             "can_proceed": result.decision == "WARN",
