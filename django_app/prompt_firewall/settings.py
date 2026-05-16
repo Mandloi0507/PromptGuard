@@ -21,7 +21,13 @@ if _env_path.exists():
             _line = _line.strip()
             if _line and not _line.startswith('#') and '=' in _line:
                 _key, _, _val = _line.partition('=')
-                os.environ.setdefault(_key.strip(), _val.strip().strip('"').strip("'"))
+                _key = _key.strip()
+                _val = _val.strip().strip('"').strip("'")
+                if _val:
+                    os.environ[_key] = _val
+    print(f"[promptguard] Loaded .env from {_env_path}")
+else:
+    print(f"[promptguard] No .env file found at {_env_path}")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
