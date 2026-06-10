@@ -156,8 +156,9 @@
     const badge=document.getElementById('fw-decision-badge');
     badge.textContent=data.proceeded_after_warning?'SENT AFTER WARN':data.decision;
     badge.className=`badge ${getBadgeClass(data.decision)}`;
-    const forwarded=data.proceeded_after_warning || data.decision==='ALLOW';
-    document.getElementById('fw-decision-message').textContent=forwarded?'Forwarded to model':data.decision==='WARN'?'Review before sending':'Prompt intercepted';
+    const forwarded=Boolean(data.forwarded_to_llm || data.llm_used || data.llm_response);
+    const fallbackHeld=Boolean(data.fallback_used && !data.analysis_available && !data.can_proceed);
+    document.getElementById('fw-decision-message').textContent=forwarded?'Forwarded to model':fallbackHeld?'Primary analysis unavailable':data.decision==='WARN'?'Review before sending':'Prompt intercepted';
     document.getElementById('fw-time').textContent=`${data.processing_time_ms}ms`;
     document.getElementById('fw-score-label').textContent=`${data.risk_score} / 100`;
     document.getElementById('fw-model-used').textContent=forwarded?(data.llm_used||llm||'-'):'Not forwarded';
@@ -171,8 +172,11 @@
     }else{
       attackTypes.appendChild(makeBadge('None detected','badge badge-allow'));
     }
-    replaceChildrenTextList(document.getElementById('fw-reasons'),data.reasons,'No threats detected — prompt is safe');
-    setWarnActionsVisible(data.decision==='WARN' && !data.proceeded_after_warning);
+    if(data.fallback_used){
+      attackTypes.appendChild(makeBadge('Fallback mode','badge badge-warn'));
+    }
+    replaceChildrenTextList(document.getElementById('fw-reasons'),data.reasons,'No threats detected - prompt is safe');
+    setWarnActionsVisible(Boolean(data.can_proceed) && data.decision==='WARN' && !data.proceeded_after_warning);
 
     const responseWrap=document.getElementById('llm-response-wrap');
     if(forwarded){

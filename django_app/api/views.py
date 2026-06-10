@@ -3,6 +3,7 @@ import sys
 import os
 import hashlib
 import uuid
+from dataclasses import replace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
@@ -100,6 +101,54 @@ def _write_audit_log(
     )
 
 
+def _classifier_trusted(result):
+    return bool(
+        getattr(result, "analysis_available", True)
+        and not getattr(result, "fallback_used", False)
+    )
+
+
+def _effective_result(result):
+    """
+    Fail closed when Gemini is unavailable and the narrow fallback found no
+    known pattern. Fallback can help detect obvious attacks, but it should not
+    silently forward content as safe.
+    """
+    if _classifier_trusted(result) or result.decision != "ALLOW":
+        return result
+
+    reasons = list(result.reasons)
+    hold_reason = (
+        "Gemini analysis was unavailable; forwarding is held until the "
+        "primary classifier is available."
+    )
+    if hold_reason not in reasons:
+        reasons.append(hold_reason)
+
+    return replace(
+        result,
+        decision="WARN",
+        threat_level="MEDIUM",
+        risk_score=max(result.risk_score, 30),
+        reasons=reasons,
+        ai_reasoning=" | ".join(reasons),
+    )
+
+
+def _analysis_payload(result):
+    return {
+        "decision": result.decision,
+        "threat_level": result.threat_level,
+        "risk_score": result.risk_score,
+        "attack_types": result.attack_types,
+        "reasons": result.reasons,
+        "ai_reasoning": result.ai_reasoning,
+        "analysis_available": result.analysis_available,
+        "fallback_used": result.fallback_used,
+        "processing_time_ms": round(result.processing_time_ms, 1),
+    }
+
+
 @require_http_methods(["POST"])
 def analyze(request):
     try:
@@ -107,7 +156,7 @@ def analyze(request):
         prompt = _clean_prompt(body.get("prompt"))
         request_id = str(uuid.uuid4())
 
-        result = firewall.analyze(prompt)
+        result = _effective_result(firewall.analyze(prompt))
 
         _write_audit_log(
             request,
@@ -117,15 +166,7 @@ def analyze(request):
             result=result,
         )
 
-        return JsonResponse({
-            "decision": result.decision,
-            "threat_level": result.threat_level,
-            "risk_score": result.risk_score,
-            "attack_types": result.attack_types,
-            "reasons": result.reasons,
-            "ai_reasoning": result.ai_reasoning,
-            "processing_time_ms": round(result.processing_time_ms, 1),
-        })
+        return JsonResponse(_analysis_payload(result))
 
     except json.JSONDecodeError:
         return _error_response("Invalid JSON", status=400)
@@ -148,13 +189,15 @@ def firewall_view(request):
         if llm_name not in ALLOWED_LLMS:
             return _error_response("Unsupported LLM adapter", status=400)
 
-        result = firewall.analyze(prompt)
+        result = _effective_result(firewall.analyze(prompt))
+        classifier_trusted = _classifier_trusted(result)
 
         llm_response = None
         llm_error = None
 
-        should_forward = result.decision == "ALLOW" or (
-            result.decision == "WARN" and proceed_on_warn
+        should_forward = classifier_trusted and (
+            result.decision == "ALLOW"
+            or (result.decision == "WARN" and proceed_on_warn)
         )
 
         if should_forward:
@@ -181,21 +224,20 @@ def firewall_view(request):
             llm_response=llm_response,
             llm_error=llm_error,
             forwarded_to_llm=should_forward and llm_error is None,
-            proceeded_after_warning=result.decision == "WARN" and should_forward,
+            proceeded_after_warning=(
+                classifier_trusted and result.decision == "WARN" and should_forward
+            ),
         )
 
         response_data = {
-            "decision": result.decision,
-            "threat_level": result.threat_level,
-            "risk_score": result.risk_score,
-            "attack_types": result.attack_types,
-            "reasons": result.reasons,
-            "ai_reasoning": result.ai_reasoning,
+            **_analysis_payload(result),
             "llm_used": llm_name if should_forward else None,
             "llm_response": llm_response,
-            "can_proceed": result.decision == "WARN",
-            "proceeded_after_warning": result.decision == "WARN" and should_forward,
-            "processing_time_ms": round(result.processing_time_ms, 1),
+            "forwarded_to_llm": should_forward and llm_error is None,
+            "can_proceed": classifier_trusted and result.decision == "WARN",
+            "proceeded_after_warning": (
+                classifier_trusted and result.decision == "WARN" and should_forward
+            ),
         }
 
         if result.decision != "ALLOW":

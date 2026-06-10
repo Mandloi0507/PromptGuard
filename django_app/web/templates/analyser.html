@@ -10,7 +10,7 @@
       <p class="page-sub">Scan a prompt before it reaches any model. Results are written to the audit trail.</p>
     </div>
     <div class="status-row">
-      <span class="chip">🤖 Gemini AI Analysis</span>
+      <span class="chip">Gemini AI Analysis</span>
       <span class="chip">Generative Detection</span>
     </div>
   </div>
@@ -53,7 +53,7 @@
       </div>
       <div class="drawer-row" style="margin-top:1rem;">
         <div class="drawer-key">Engine</div>
-        <div class="drawer-value muted">Powered by Gemini AI — generative prompt injection detection.</div>
+        <div class="drawer-value muted">Gemini classifies all submitted text as untrusted data.</div>
       </div>
     </aside>
   </div>
@@ -106,6 +106,31 @@
     updateCounter('prompt-input','prompt-count');
     document.getElementById('result-card').classList.add('result-hidden');
   }
+  function renderAnalysisResult(data){
+    const result=document.getElementById('result-card');
+    result.className=`panel result-panel ${getPanelClass(data.decision)}`;
+    const badge=document.getElementById('decision-badge');
+    badge.textContent=data.decision;
+    badge.className=`badge ${getBadgeClass(data.decision)}`;
+    document.getElementById('threat-label').textContent=`Threat ${data.threat_level}`;
+    document.getElementById('time-label').textContent=`${data.processing_time_ms}ms`;
+    document.getElementById('score-label').textContent=`${data.risk_score} / 100`;
+    document.getElementById('threat-metric').textContent=data.threat_level;
+    document.getElementById('attack-count').textContent=data.attack_types.length;
+    document.getElementById('risk-fill').style.width=`${data.risk_score}%`;
+
+    const attackTypes=document.getElementById('attack-types');
+    attackTypes.replaceChildren();
+    if(data.attack_types.length){
+      data.attack_types.forEach(t=>attackTypes.appendChild(makeBadge(t.replace(/_/g,' '),'badge badge-block')));
+    }else{
+      attackTypes.appendChild(makeBadge('None detected','badge badge-allow'));
+    }
+    if(data.fallback_used){
+      attackTypes.appendChild(makeBadge('Fallback mode','badge badge-warn'));
+    }
+    replaceChildrenTextList(document.getElementById('reasons-list'),data.reasons,'No threats detected - content is safe');
+  }
   async function runAnalysis(){
     const prompt=document.getElementById('prompt-input').value.trim();
     if(!prompt)return;
@@ -123,26 +148,7 @@
       });
       const data=await res.json();
       if(!res.ok)throw new Error(data.error||'Analysis failed');
-
-      result.className=`panel result-panel ${getPanelClass(data.decision)}`;
-      const badge=document.getElementById('decision-badge');
-      badge.textContent=data.decision;
-      badge.className=`badge ${getBadgeClass(data.decision)}`;
-      document.getElementById('threat-label').textContent=`Threat ${data.threat_level}`;
-      document.getElementById('time-label').textContent=`${data.processing_time_ms}ms`;
-      document.getElementById('score-label').textContent=`${data.risk_score} / 100`;
-      document.getElementById('threat-metric').textContent=data.threat_level;
-      document.getElementById('attack-count').textContent=data.attack_types.length;
-      document.getElementById('risk-fill').style.width=`${data.risk_score}%`;
-
-      const attackTypes=document.getElementById('attack-types');
-      attackTypes.replaceChildren();
-      if(data.attack_types.length){
-        data.attack_types.forEach(t=>attackTypes.appendChild(makeBadge(t.replace(/_/g,' '),'badge badge-block')));
-      }else{
-        attackTypes.appendChild(makeBadge('None detected','badge badge-allow'));
-      }
-      replaceChildrenTextList(document.getElementById('reasons-list'),data.reasons,'No threats detected — prompt is safe');
+      renderAnalysisResult(data);
     }catch(err){
       alert('Error: '+err.message);
     }finally{

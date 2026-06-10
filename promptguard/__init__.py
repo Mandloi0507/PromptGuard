@@ -33,6 +33,8 @@ class FirewallResult:
     reasons: list             # plain-English explanation list from the AI
     ai_reasoning: str         # full AI reasoning as a single string
     processing_time_ms: float  # how long the analysis took
+    analysis_available: bool = True  # True when Gemini produced the verdict
+    fallback_used: bool = False       # True when local fallback was used
 
     def is_safe(self) -> bool:
         """Returns True only if the decision is ALLOW."""
@@ -112,4 +114,6 @@ class Firewall:
             reasons=reasoning_list,
             ai_reasoning=ai_reasoning_str,
             processing_time_ms=elapsed_ms,
+            analysis_available=bool(result.get("analysis_available", True)),
+            fallback_used=bool(result.get("fallback_used", False)),
         )
