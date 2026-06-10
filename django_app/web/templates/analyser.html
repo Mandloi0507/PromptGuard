@@ -22,13 +22,28 @@
         <span class="chip" id="prompt-count">0 chars</span>
       </div>
       <label for="prompt-input">Prompt to analyse</label>
-      <textarea id="prompt-input" rows="6" placeholder="Paste a prompt for firewall inspection..." oninput="updateCounter('prompt-input','prompt-count')"></textarea>
+      <div class="composer">
+        <button class="composer-plus" type="button" onclick="toggleAttachMenu()" aria-label="Add content">+</button>
+        <textarea id="prompt-input" rows="6" placeholder="Paste a prompt for firewall inspection..." oninput="updateCounter('prompt-input','prompt-count')"></textarea>
+        <div class="attach-menu result-hidden" id="attach-menu">
+          <button type="button" onclick="chooseFileForAnalysis()">Add document or file</button>
+          <button type="button" onclick="chooseImageForAnalysis()">Add photo or image</button>
+        </div>
+        <input id="file-input" class="result-hidden" type="file" accept=".pdf,.docx,.txt,.md,.csv,.json,.xml,.html,.htm,.log,.py,.js,.ts,.tsx,.jsx,.css,.yaml,.yml" onchange="handleFileSelected()"/>
+        <input id="image-input" class="result-hidden" type="file" accept="image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp" onchange="handleImageSelected()"/>
+      </div>
       <div class="field-meta">
         <span>Ctrl + Enter to analyse</span>
         <span>Max request size enforced by API</span>
       </div>
+      <div id="file-meta" class="status-row file-meta"></div>
+      <div id="image-preview-wrap" class="result-hidden image-preview-wrap">
+        <img id="image-preview" class="image-preview" alt="Preview"/>
+      </div>
       <div class="btn-row">
         <button class="btn btn-primary" id="analyse-btn" onclick="runAnalysis()">Analyse Prompt</button>
+        <button class="btn btn-primary result-hidden" id="file-analyse-btn" onclick="runFileAnalysis()">Analyse File</button>
+        <button class="btn btn-primary result-hidden" id="image-analyse-btn" onclick="runImageAnalysis()">Analyse Image</button>
         <button class="btn btn-secondary" onclick="clearAnalysis()">Clear</button>
         <div class="loader" id="loader">
           <div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div>
@@ -98,13 +113,149 @@
     </div>
   </section>
 </div>
+<style>
+  .composer {
+    position: relative;
+  }
+  .composer textarea {
+    padding-left: 3.25rem;
+  }
+  .composer-plus {
+    position: absolute;
+    top: 0.85rem;
+    left: 0.8rem;
+    z-index: 2;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel-3);
+    color: var(--text-strong);
+    cursor: pointer;
+    font-size: 1.45rem;
+    line-height: 1;
+  }
+  .attach-menu {
+    position: absolute;
+    top: 3.2rem;
+    left: 0.8rem;
+    z-index: 10;
+    width: min(280px, calc(100% - 1.6rem));
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #111820;
+    padding: 0.45rem;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+  }
+  .attach-menu button {
+    width: 100%;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    padding: 0.75rem;
+    text-align: left;
+    font: inherit;
+  }
+  .attach-menu button:hover:not(:disabled) {
+    background: rgba(22,215,232,0.1);
+  }
+  .attach-menu button:disabled {
+    color: var(--muted-2);
+    cursor: not-allowed;
+  }
+  .attach-menu span {
+    float: right;
+    color: var(--warn);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+  }
+  .file-meta {
+    margin-top: 0.8rem;
+  }
+  .image-preview-wrap {
+    margin-top: 0.8rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.5rem;
+    background: var(--panel-2);
+    display: inline-block;
+  }
+  .image-preview {
+    max-width: 220px;
+    max-height: 160px;
+    border-radius: 6px;
+    display: block;
+  }
+</style>
 <script>
   function getBadgeClass(d){return d==='BLOCK'?'badge-block':d==='WARN'?'badge-warn':'badge-allow';}
   function getPanelClass(d){return d==='BLOCK'?'block':d==='WARN'?'warn':'allow';}
+  function selectedFile(){
+    const input=document.getElementById('file-input');
+    return input.files && input.files.length ? input.files[0] : null;
+  }
+  function toggleAttachMenu(){
+    document.getElementById('attach-menu').classList.toggle('result-hidden');
+  }
+  function closeAttachMenu(){
+    document.getElementById('attach-menu').classList.add('result-hidden');
+  }
+  function chooseFileForAnalysis(){
+    closeAttachMenu();
+    document.getElementById('file-input').click();
+  }
+  function handleFileSelected(){
+    const file=selectedFile();
+    const meta=document.getElementById('file-meta');
+    meta.replaceChildren();
+    if(!file)return;
+    meta.appendChild(makeBadge(file.name,'badge badge-allow'));
+    meta.appendChild(makeBadge(`${Math.ceil(file.size/1024)} KB selected`,'badge'));
+    document.getElementById('file-analyse-btn').classList.remove('result-hidden');
+  }
   function clearAnalysis(){
     document.getElementById('prompt-input').value='';
+    document.getElementById('file-input').value='';
+    document.getElementById('image-input').value='';
+    document.getElementById('file-meta').replaceChildren();
+    document.getElementById('file-analyse-btn').classList.add('result-hidden');
+    document.getElementById('image-analyse-btn').classList.add('result-hidden');
+    document.getElementById('image-preview-wrap').classList.add('result-hidden');
     updateCounter('prompt-input','prompt-count');
     document.getElementById('result-card').classList.add('result-hidden');
+    closeAttachMenu();
+  }
+  function chooseImageForAnalysis(){
+    closeAttachMenu();
+    document.getElementById('image-input').click();
+  }
+  function handleImageSelected(){
+    const input=document.getElementById('image-input');
+    const file=input.files && input.files.length ? input.files[0] : null;
+    const meta=document.getElementById('file-meta');
+    const previewWrap=document.getElementById('image-preview-wrap');
+    const previewImg=document.getElementById('image-preview');
+    meta.replaceChildren();
+    if(!file){
+      previewWrap.classList.add('result-hidden');
+      return;
+    }
+    meta.appendChild(makeBadge(file.name,'badge badge-allow'));
+    meta.appendChild(makeBadge(`${Math.ceil(file.size/1024)} KB selected`,'badge'));
+    meta.appendChild(makeBadge('Image','badge'));
+    document.getElementById('image-analyse-btn').classList.remove('result-hidden');
+    document.getElementById('file-analyse-btn').classList.add('result-hidden');
+    // Show preview
+    const reader=new FileReader();
+    reader.onload=function(e){
+      previewImg.src=e.target.result;
+      previewWrap.classList.remove('result-hidden');
+    };
+    reader.readAsDataURL(file);
+    // Clear any selected document file
+    document.getElementById('file-input').value='';
   }
   function renderAnalysisResult(data){
     const result=document.getElementById('result-card');
@@ -129,6 +280,12 @@
     if(data.fallback_used){
       attackTypes.appendChild(makeBadge('Fallback mode','badge badge-warn'));
     }
+    if(data.file){
+      attackTypes.appendChild(makeBadge(`${data.file.analyzed_chars}/${data.file.extracted_chars} chars analysed`,'badge'));
+      if(data.file.truncated){
+        attackTypes.appendChild(makeBadge('Truncated for limit','badge badge-warn'));
+      }
+    }
     replaceChildrenTextList(document.getElementById('reasons-list'),data.reasons,'No threats detected - content is safe');
   }
   async function runAnalysis(){
@@ -150,12 +307,92 @@
       if(!res.ok)throw new Error(data.error||'Analysis failed');
       renderAnalysisResult(data);
     }catch(err){
-      alert('Error: '+err.message);
+      showToast(err.message,'error');
     }finally{
       btn.disabled=false;
       loader.classList.remove('active');
     }
   }
+  async function runFileAnalysis(){
+    const file=selectedFile();
+    if(!file)return;
+    const btn=document.getElementById('file-analyse-btn');
+    const promptBtn=document.getElementById('analyse-btn');
+    const loader=document.getElementById('loader');
+    const result=document.getElementById('result-card');
+    const meta=document.getElementById('file-meta');
+    const formData=new FormData();
+    formData.append('file',file);
+    btn.disabled=true;
+    promptBtn.disabled=true;
+    loader.classList.add('active');
+    result.classList.add('result-hidden');
+    try{
+      const res=await fetch('/api/analyze-file',{
+        method:'POST',
+        headers:{'X-CSRFToken':getCookie('csrftoken')||''},
+        body:formData
+      });
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||'File analysis failed');
+      renderAnalysisResult(data);
+      meta.replaceChildren();
+      meta.appendChild(makeBadge(data.file.name,'badge badge-allow'));
+      meta.appendChild(makeBadge(`${data.file.analyzed_chars}/${data.file.extracted_chars} chars analysed`,'badge'));
+      if(data.file.truncated){
+        meta.appendChild(makeBadge('Truncated for analysis limit','badge badge-warn'));
+      }
+    }catch(err){
+      showToast(err.message,'error');
+    }finally{
+      btn.disabled=false;
+      promptBtn.disabled=false;
+      loader.classList.remove('active');
+    }
+  }
+  document.addEventListener('click',e=>{
+    const menu=document.getElementById('attach-menu');
+    const plus=document.querySelector('.composer-plus');
+    if(!menu.contains(e.target) && e.target!==plus){
+      closeAttachMenu();
+    }
+  });
   document.getElementById('prompt-input').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter')runAnalysis();});
+  async function runImageAnalysis(){
+    const input=document.getElementById('image-input');
+    const file=input.files && input.files.length ? input.files[0] : null;
+    if(!file)return;
+    const btn=document.getElementById('image-analyse-btn');
+    const promptBtn=document.getElementById('analyse-btn');
+    const loader=document.getElementById('loader');
+    const result=document.getElementById('result-card');
+    const meta=document.getElementById('file-meta');
+    const formData=new FormData();
+    formData.append('file',file);
+    btn.disabled=true;
+    promptBtn.disabled=true;
+    loader.classList.add('active');
+    result.classList.add('result-hidden');
+    try{
+      const res=await fetch('/api/analyze-image',{
+        method:'POST',
+        headers:{'X-CSRFToken':getCookie('csrftoken')||''},
+        body:formData
+      });
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||'Image analysis failed');
+      renderAnalysisResult(data);
+      meta.replaceChildren();
+      meta.appendChild(makeBadge(data.file.name,'badge badge-allow'));
+      meta.appendChild(makeBadge(`${Math.ceil(data.file.size/1024)} KB analysed`,'badge'));
+      meta.appendChild(makeBadge('Image','badge'));
+    }catch(err){
+      showToast(err.message,'error');
+    }finally{
+      btn.disabled=false;
+      promptBtn.disabled=false;
+      loader.classList.remove('active');
+    }
+  }
 </script>
 {% endblock %}

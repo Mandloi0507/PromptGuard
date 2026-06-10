@@ -339,6 +339,104 @@
     {% block content %}{% endblock %}
   </main>
 </div>
+<!-- Toast Notification Container -->
+<div id="toast-container" class="toast-container"></div>
+<style>
+  .toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    pointer-events: none;
+    max-width: min(420px, calc(100vw - 2rem));
+  }
+  .toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7rem;
+    padding: 0.85rem 1rem;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #0d131b;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 0.88rem;
+    line-height: 1.45;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    animation: toastSlideIn 0.3s ease forwards;
+    position: relative;
+    overflow: hidden;
+  }
+  .toast.toast-removing {
+    animation: toastSlideOut 0.28s ease forwards;
+  }
+  .toast-icon {
+    font-size: 1.15rem;
+    line-height: 1;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+  }
+  .toast-body { flex: 1; min-width: 0; }
+  .toast-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    margin-bottom: 0.2rem;
+  }
+  .toast-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 0;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .toast-close:hover { color: var(--text-strong); }
+  .toast-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    border-radius: 0 0 10px 10px;
+    animation: toastProgress linear forwards;
+  }
+  .toast-error { border-color: rgba(255,77,109,0.4); }
+  .toast-error .toast-title { color: var(--danger); }
+  .toast-error .toast-icon { color: var(--danger); }
+  .toast-error .toast-progress { background: var(--danger); }
+  .toast-success { border-color: rgba(32,214,123,0.4); }
+  .toast-success .toast-title { color: var(--safe); }
+  .toast-success .toast-icon { color: var(--safe); }
+  .toast-success .toast-progress { background: var(--safe); }
+  .toast-warn { border-color: rgba(255,176,32,0.4); }
+  .toast-warn .toast-title { color: var(--warn); }
+  .toast-warn .toast-icon { color: var(--warn); }
+  .toast-warn .toast-progress { background: var(--warn); }
+  .toast-info { border-color: rgba(22,215,232,0.4); }
+  .toast-info .toast-title { color: var(--accent); }
+  .toast-info .toast-icon { color: var(--accent); }
+  .toast-info .toast-progress { background: var(--accent); }
+  @keyframes toastSlideIn {
+    from { opacity: 0; transform: translateX(100%); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes toastSlideOut {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(100%); }
+  }
+  @keyframes toastProgress {
+    from { width: 100%; }
+    to   { width: 0%; }
+  }
+</style>
 <script>
   function getCookie(name){
     const match=document.cookie.match(new RegExp('(^| )'+name+'=([^;]+)'));
@@ -368,6 +466,45 @@
     const source=document.getElementById(sourceId);
     const target=document.getElementById(targetId);
     if(source && target) target.textContent=`${source.value.length} chars`;
+  }
+
+  /* ─── Toast Notification System ─── */
+  const _toastConfig = {
+    error:   { icon: '✕', title: 'Error',   duration: 6000 },
+    success: { icon: '✓', title: 'Success', duration: 4000 },
+    warn:    { icon: '⚠', title: 'Warning', duration: 5000 },
+    info:    { icon: 'ℹ', title: 'Info',    duration: 4000 },
+  };
+  function showToast(message, type='error') {
+    const cfg = _toastConfig[type] || _toastConfig.info;
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `
+      <span class="toast-icon">${cfg.icon}</span>
+      <div class="toast-body">
+        <div class="toast-title">${cfg.title}</div>
+        <div>${_escapeHtml(message)}</div>
+      </div>
+      <button class="toast-close" onclick="dismissToast(this.parentElement)">✕</button>
+      <div class="toast-progress" style="animation-duration:${cfg.duration}ms"></div>
+    `;
+    container.appendChild(toast);
+    // Auto-remove
+    const timer = setTimeout(() => dismissToast(toast), cfg.duration);
+    toast._timer = timer;
+  }
+  function dismissToast(toast) {
+    if (!toast || toast._dismissed) return;
+    toast._dismissed = true;
+    clearTimeout(toast._timer);
+    toast.classList.add('toast-removing');
+    toast.addEventListener('animationend', () => toast.remove());
+  }
+  function _escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
   }
 </script>
 </body>

@@ -178,6 +178,7 @@
       display: flex;
       gap: 1rem;
       justify-content: center;
+      flex-wrap: wrap;
       animation: fadeInUp 1s ease 0.6s both;
     }
 
@@ -260,6 +261,29 @@
     .glass-card p {
       color: var(--text-muted);
       font-size: 1rem;
+    }
+    .flow-list {
+      max-width: 900px;
+      margin: 3rem auto 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+    .flow-step {
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      background: rgba(255,255,255,0.03);
+    }
+    .flow-step strong {
+      display: block;
+      color: #fff;
+      font-family: var(--font-display);
+      margin-bottom: 0.4rem;
+    }
+    .flow-step span {
+      color: var(--text-muted);
+      font-size: 0.95rem;
     }
 
     /* Dashboard Preview */
@@ -344,45 +368,52 @@
     <div class="nav-links">
       <a href="#features">Features</a>
       <a href="/analyser/">Analyser</a>
+      <a href="/firewall/">Live Firewall</a>
       <a href="/dashboard/">Audit Logs</a>
     </div>
   </nav>
 
   <section class="hero">
-    <div class="badge">Next-Gen AI Security</div>
-    <h1>Secure Your AI Models<br>With Absolute Precision.</h1>
-    <p>Enterprise-grade firewall for Large Language Models. Inspect, block, and audit malicious prompts before they ever reach your API.</p>
+    <div class="badge">Gemini-Powered Prompt Firewall</div>
+    <h1>Inspect Prompts<br>Before They Reach Your Model.</h1>
+    <p>PromptGuard classifies user prompts as ALLOW, WARN, or BLOCK using Gemini analysis, local fallback scanning, live LLM routing, and an auditable decision trail.</p>
+    <div class="cta-group">
+      <a href="/firewall/" class="btn btn-primary">Open Live Firewall</a>
+      <a href="/analyser/" class="btn btn-glass">Analyse A Prompt</a>
+    </div>
   </section>
 
   <section id="features" class="features">
-    <h2 class="section-title">Intelligent Threat Detection</h2>
+    <h2 class="section-title">What PromptGuard Actually Does</h2>
     <div class="grid">
-      <!-- Feature 1 -->
       <div class="glass-card">
         <div class="card-icon">
           <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         </div>
-        <h3>Pattern Scan</h3>
-        <p>Instantly detects known injection patterns, malicious payloads, and common jailbreak attempts using advanced regex heuristics.</p>
+        <h3>Gemini Classification</h3>
+        <p>Prompts are wrapped as untrusted data and classified by Gemini into ALLOW, WARN, or BLOCK with risk score, threat level, attack type, and reasoning.</p>
       </div>
       
-      <!-- Feature 2 -->
       <div class="glass-card">
         <div class="card-icon">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
         </div>
-        <h3>Semantic Analysis</h3>
-        <p>Goes beyond keywords. Evaluates the underlying intent of the prompt using semantic similarity and vector-based analysis.</p>
+        <h3>Fail-Closed Fallback</h3>
+        <p>If Gemini is unavailable, local scanning still catches obvious attacks and the firewall holds uncertain safe-looking prompts instead of forwarding blindly.</p>
       </div>
 
-      <!-- Feature 3 -->
       <div class="glass-card">
         <div class="card-icon">
           <svg viewBox="0 0 24 24"><path d="M2 12h4l3-9 5 18 3-9h5"/></svg>
         </div>
-        <h3>Risk Scoring</h3>
-        <p>Calculates a deterministic threat score (0-100) allowing for granular ALLOW, WARN, and BLOCK enforcement policies.</p>
+        <h3>Live Routing And Audit</h3>
+        <p>Safe prompts can be forwarded to Ollama, OpenAI, Claude, or Gemini. Every decision is stored in the audit dashboard with forwarding and warning history.</p>
       </div>
+    </div>
+    <div class="flow-list">
+      <div class="flow-step"><strong>1. Analyse</strong><span>The prompt is inspected as untrusted input.</span></div>
+      <div class="flow-step"><strong>2. Decide</strong><span>ALLOW continues, WARN pauses for review, BLOCK stops.</span></div>
+      <div class="flow-step"><strong>3. Audit</strong><span>Each result is logged for review and demonstration.</span></div>
     </div>
   </section>
 

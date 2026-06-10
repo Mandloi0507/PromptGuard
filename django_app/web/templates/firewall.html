@@ -24,10 +24,23 @@
         <span class="chip" id="fw-count">0 chars</span>
       </div>
       <label for="fw-prompt">Prompt</label>
-      <textarea id="fw-prompt" rows="5" placeholder="Enter a prompt to send through the firewall..." oninput="updateCounter('fw-prompt','fw-count')"></textarea>
+      <div class="composer">
+        <button class="composer-plus" type="button" onclick="toggleAttachMenu()" aria-label="Add content">+</button>
+        <textarea id="fw-prompt" rows="5" placeholder="Enter a prompt to send through the firewall..." oninput="updateCounter('fw-prompt','fw-count')"></textarea>
+        <div class="attach-menu result-hidden" id="fw-attach-menu">
+          <button type="button" onclick="chooseFirewallFile()">Add document or file</button>
+          <button type="button" onclick="chooseFirewallImage()">Add photo or image</button>
+        </div>
+        <input id="fw-file-input" class="result-hidden" type="file" accept=".pdf,.docx,.txt,.md,.csv,.json,.xml,.html,.htm,.log,.py,.js,.ts,.tsx,.jsx,.css,.yaml,.yml" onchange="handleFirewallFileSelected()"/>
+        <input id="fw-image-input" class="result-hidden" type="file" accept="image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp" onchange="handleFirewallImageSelected()"/>
+      </div>
       <div class="field-meta">
         <span>WARN prompts require explicit review</span>
         <span>BLOCK prompts never forward</span>
+      </div>
+      <div id="fw-file-meta" class="status-row file-meta"></div>
+      <div id="fw-image-preview-wrap" class="result-hidden image-preview-wrap">
+        <img id="fw-image-preview" class="image-preview" alt="Preview"/>
       </div>
 
       <div class="form-grid" style="margin-top:1rem;">
@@ -48,6 +61,8 @@
 
       <div class="btn-row">
         <button class="btn btn-primary" id="fw-btn" onclick="runFirewall()">Send Through Firewall</button>
+        <button class="btn btn-primary result-hidden" id="fw-file-btn" onclick="runFileFirewall()">Send File Through Firewall</button>
+        <button class="btn btn-primary result-hidden" id="fw-image-btn" onclick="runImageFirewall()">Send Image Through Firewall</button>
         <button class="btn btn-secondary" onclick="clearFirewall()">Clear</button>
         <div class="loader" id="fw-loader">
           <div class="loader-dot"></div><div class="loader-dot"></div><div class="loader-dot"></div>
@@ -83,7 +98,7 @@
         <span id="fw-time" class="chip"></span>
       </div>
       <div id="warn-actions" class="result-hidden status-row">
-        <button class="btn btn-warn" id="warn-proceed-btn" onclick="runFirewall(true)">Send Anyway</button>
+        <button class="btn btn-warn" id="warn-proceed-btn" onclick="openWarningReview()">Review And Send</button>
         <button class="btn btn-secondary" onclick="dismissWarning()">Dismiss</button>
       </div>
     </div>
@@ -123,16 +138,188 @@
       <div class="llm-box" id="llm-response">-</div>
     </div>
   </section>
+
+  <div class="warn-modal result-hidden" id="warn-review-modal" role="dialog" aria-modal="true" aria-labelledby="warn-review-title">
+    <div class="warn-modal-card">
+      <div class="panel-head">
+        <div>
+          <h2 class="section-title" id="warn-review-title">Warning Review</h2>
+          <p class="page-sub">This content was flagged as suspicious. Review the risk details before forwarding it to the selected model.</p>
+        </div>
+        <button class="btn btn-secondary" onclick="closeWarningReview()">Close</button>
+      </div>
+      <div class="metric-grid">
+        <div class="metric">
+          <div class="metric-label">Risk Score</div>
+          <div class="metric-value" id="warn-review-score">0 / 100</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Model</div>
+          <div class="metric-value" id="warn-review-model">-</div>
+        </div>
+      </div>
+      <div class="drawer-row">
+        <div class="drawer-key">Attack Types</div>
+        <div class="drawer-value" id="warn-review-attacks">None detected</div>
+      </div>
+      <div class="drawer-row">
+        <div class="drawer-key">Reason</div>
+        <div class="drawer-value" id="warn-review-reason">No reasoning recorded.</div>
+      </div>
+      <label class="warn-confirm-row" for="warn-confirm-check">
+        <input id="warn-confirm-check" type="checkbox" onchange="toggleWarnConfirm()"/>
+        I understand this prompt was flagged and still want to forward it.
+      </label>
+      <div class="btn-row">
+        <button class="btn btn-warn" id="warn-confirm-btn" onclick="confirmWarningProceed()" disabled>Send Anyway</button>
+        <button class="btn btn-secondary" onclick="closeWarningReview()">Cancel</button>
+      </div>
+    </div>
+  </div>
 </div>
+<style>
+  .warn-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(0,0,0,0.68);
+  }
+  .warn-modal-card {
+    width: min(640px, 100%);
+    border: 1px solid rgba(255,176,32,0.45);
+    border-radius: 8px;
+    background: #091017;
+    padding: 1.25rem;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.55);
+  }
+  .warn-confirm-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    margin-top: 1rem;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    text-transform: none;
+  }
+  .warn-confirm-row input {
+    width: auto;
+    height: auto;
+    margin-top: 0.2rem;
+  }
+  .composer {
+    position: relative;
+  }
+  .composer textarea {
+    padding-left: 3.25rem;
+  }
+  .composer-plus {
+    position: absolute;
+    top: 0.85rem;
+    left: 0.8rem;
+    z-index: 2;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel-3);
+    color: var(--text-strong);
+    cursor: pointer;
+    font-size: 1.45rem;
+    line-height: 1;
+  }
+  .attach-menu {
+    position: absolute;
+    top: 3.2rem;
+    left: 0.8rem;
+    z-index: 10;
+    width: min(280px, calc(100% - 1.6rem));
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #111820;
+    padding: 0.45rem;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+  }
+  .attach-menu button {
+    width: 100%;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    padding: 0.75rem;
+    text-align: left;
+    font: inherit;
+  }
+  .attach-menu button:hover:not(:disabled) {
+    background: rgba(22,215,232,0.1);
+  }
+  .attach-menu button:disabled {
+    color: var(--muted-2);
+    cursor: not-allowed;
+  }
+  .attach-menu span {
+    float: right;
+    color: var(--warn);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+  }
+  .file-meta {
+    margin-top: 0.8rem;
+  }
+  .image-preview-wrap {
+    margin-top: 0.8rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.5rem;
+    background: var(--panel-2);
+    display: inline-block;
+  }
+  .image-preview {
+    max-width: 220px;
+    max-height: 160px;
+    border-radius: 6px;
+    display: block;
+  }
+</style>
 <script>
   function getBadgeClass(d){return d==='BLOCK'?'badge-block':d==='WARN'?'badge-warn':'badge-allow';}
   function getPanelClass(d){return d==='BLOCK'?'block':d==='WARN'?'warn':'allow';}
+  let lastWarningResult=null;
+  let lastWarningModel=null;
+  let lastWarningSource='prompt';
   function toggleKey(){
     document.getElementById('apikey-wrap').style.display=document.getElementById('llm-select').value==='ollama'?'none':'block';
   }
   function setPrompt(t){
     document.getElementById('fw-prompt').value=t;
     updateCounter('fw-prompt','fw-count');
+  }
+  function selectedFirewallFile(){
+    const input=document.getElementById('fw-file-input');
+    return input.files && input.files.length ? input.files[0] : null;
+  }
+  function toggleAttachMenu(){
+    document.getElementById('fw-attach-menu').classList.toggle('result-hidden');
+  }
+  function closeAttachMenu(){
+    document.getElementById('fw-attach-menu').classList.add('result-hidden');
+  }
+  function chooseFirewallFile(){
+    closeAttachMenu();
+    document.getElementById('fw-file-input').click();
+  }
+  function handleFirewallFileSelected(){
+    const file=selectedFirewallFile();
+    const meta=document.getElementById('fw-file-meta');
+    meta.replaceChildren();
+    if(!file)return;
+    meta.appendChild(makeBadge(file.name,'badge badge-allow'));
+    meta.appendChild(makeBadge(`${Math.ceil(file.size/1024)} KB selected`,'badge'));
+    document.getElementById('fw-file-btn').classList.remove('result-hidden');
   }
   function setWarnActionsVisible(visible){
     const actions=document.getElementById('warn-actions');
@@ -141,16 +328,81 @@
   function clearFirewall(){
     document.getElementById('fw-prompt').value='';
     document.getElementById('api-key').value='';
+    document.getElementById('fw-file-input').value='';
+    document.getElementById('fw-image-input').value='';
+    document.getElementById('fw-file-meta').replaceChildren();
+    document.getElementById('fw-file-btn').classList.add('result-hidden');
+    document.getElementById('fw-image-btn').classList.add('result-hidden');
+    document.getElementById('fw-image-preview-wrap').classList.add('result-hidden');
     updateCounter('fw-prompt','fw-count');
+    closeAttachMenu();
     hideResults();
+  }
+  function chooseFirewallImage(){
+    closeAttachMenu();
+    document.getElementById('fw-image-input').click();
+  }
+  function handleFirewallImageSelected(){
+    const input=document.getElementById('fw-image-input');
+    const file=input.files && input.files.length ? input.files[0] : null;
+    const meta=document.getElementById('fw-file-meta');
+    const previewWrap=document.getElementById('fw-image-preview-wrap');
+    const previewImg=document.getElementById('fw-image-preview');
+    meta.replaceChildren();
+    if(!file){
+      previewWrap.classList.add('result-hidden');
+      return;
+    }
+    meta.appendChild(makeBadge(file.name,'badge badge-allow'));
+    meta.appendChild(makeBadge(`${Math.ceil(file.size/1024)} KB selected`,'badge'));
+    meta.appendChild(makeBadge('Image','badge'));
+    document.getElementById('fw-image-btn').classList.remove('result-hidden');
+    document.getElementById('fw-file-btn').classList.add('result-hidden');
+    // Show preview
+    const reader=new FileReader();
+    reader.onload=function(e){
+      previewImg.src=e.target.result;
+      previewWrap.classList.remove('result-hidden');
+    };
+    reader.readAsDataURL(file);
+    // Clear any selected document file
+    document.getElementById('fw-file-input').value='';
   }
   function dismissWarning(){hideResults();}
   function hideResults(){
     document.getElementById('decision-result').classList.add('result-hidden');
     document.getElementById('llm-response-wrap').classList.add('result-hidden');
+    closeWarningReview();
     setWarnActionsVisible(false);
   }
-  function renderDecision(data,llm){
+  function openWarningReview(){
+    if(!lastWarningResult)return;
+    document.getElementById('warn-review-score').textContent=`${lastWarningResult.risk_score} / 100`;
+    document.getElementById('warn-review-model').textContent=lastWarningModel || '-';
+    document.getElementById('warn-review-attacks').textContent=lastWarningResult.attack_types.length?lastWarningResult.attack_types.map(t=>t.replace(/_/g,' ')).join(', '):'None detected';
+    document.getElementById('warn-review-reason').textContent=lastWarningResult.reasons.length?lastWarningResult.reasons.join(' | '):'No reasoning recorded.';
+    document.getElementById('warn-confirm-check').checked=false;
+    toggleWarnConfirm();
+    document.getElementById('warn-review-modal').classList.remove('result-hidden');
+  }
+  function closeWarningReview(){
+    const modal=document.getElementById('warn-review-modal');
+    if(modal) modal.classList.add('result-hidden');
+  }
+  function toggleWarnConfirm(){
+    document.getElementById('warn-confirm-btn').disabled=!document.getElementById('warn-confirm-check').checked;
+  }
+  function confirmWarningProceed(){
+    closeWarningReview();
+    if(lastWarningSource==='file'){
+      runFileFirewall(true);
+    }else if(lastWarningSource==='image'){
+      runImageFirewall(true);
+    }else{
+      runFirewall(true);
+    }
+  }
+  function renderDecision(data,llm,source='prompt'){
     const panel=document.getElementById('decision-result');
     panel.className=`panel result-panel ${getPanelClass(data.decision)}`;
     const badge=document.getElementById('fw-decision-badge');
@@ -175,8 +427,23 @@
     if(data.fallback_used){
       attackTypes.appendChild(makeBadge('Fallback mode','badge badge-warn'));
     }
+    if(data.file){
+      attackTypes.appendChild(makeBadge(`${data.file.analyzed_chars}/${data.file.extracted_chars} chars analysed`,'badge'));
+      if(data.file.truncated){
+        attackTypes.appendChild(makeBadge('Truncated for limit','badge badge-warn'));
+      }
+    }
     replaceChildrenTextList(document.getElementById('fw-reasons'),data.reasons,'No threats detected - prompt is safe');
     setWarnActionsVisible(Boolean(data.can_proceed) && data.decision==='WARN' && !data.proceeded_after_warning);
+    if(Boolean(data.can_proceed) && data.decision==='WARN' && !data.proceeded_after_warning){
+      lastWarningResult=data;
+      lastWarningModel=llm;
+      lastWarningSource=source;
+    }else{
+      lastWarningResult=null;
+      lastWarningModel=null;
+      lastWarningSource='prompt';
+    }
 
     const responseWrap=document.getElementById('llm-response-wrap');
     if(forwarded){
@@ -204,11 +471,99 @@
       });
       const data=await res.json();
       if(!res.ok)throw new Error(data.error||'Firewall request failed');
-      renderDecision(data,llm);
+      renderDecision(data,llm,'prompt');
     }catch(err){
-      alert('Error: '+err.message);
+      showToast(err.message,'error');
     }finally{
       btn.disabled=false;
+      loader.classList.remove('active');
+    }
+  }
+  async function runFileFirewall(proceed_on_warn=false){
+    const file=selectedFirewallFile();
+    if(!file)return;
+    const llm=document.getElementById('llm-select').value;
+    const api_key=document.getElementById('api-key').value.trim()||null;
+    const btn=document.getElementById('fw-file-btn');
+    const promptBtn=document.getElementById('fw-btn');
+    const loader=document.getElementById('fw-loader');
+    const meta=document.getElementById('fw-file-meta');
+    const formData=new FormData();
+    formData.append('file',file);
+    formData.append('llm',llm);
+    formData.append('proceed_on_warn',proceed_on_warn ? 'true' : 'false');
+    if(api_key)formData.append('api_key',api_key);
+    btn.disabled=true;
+    promptBtn.disabled=true;
+    loader.classList.add('active');
+    hideResults();
+    try{
+      const res=await fetch('/api/firewall-file',{
+        method:'POST',
+        headers:{'X-CSRFToken':getCookie('csrftoken')||''},
+        body:formData
+      });
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||'File firewall request failed');
+      renderDecision(data,llm,'file');
+      meta.replaceChildren();
+      meta.appendChild(makeBadge(data.file.name,'badge badge-allow'));
+      meta.appendChild(makeBadge(`${data.file.analyzed_chars}/${data.file.extracted_chars} chars analysed`,'badge'));
+      if(data.file.truncated){
+        meta.appendChild(makeBadge('Truncated for analysis limit','badge badge-warn'));
+      }
+    }catch(err){
+      showToast(err.message,'error');
+    }finally{
+      btn.disabled=false;
+      promptBtn.disabled=false;
+      loader.classList.remove('active');
+    }
+  }
+  document.addEventListener('click',e=>{
+    const menu=document.getElementById('fw-attach-menu');
+    const plus=document.querySelector('.composer-plus');
+    if(menu && !menu.contains(e.target) && e.target!==plus){
+      closeAttachMenu();
+    }
+  });
+  async function runImageFirewall(proceed_on_warn=false){
+    const input=document.getElementById('fw-image-input');
+    const file=input.files && input.files.length ? input.files[0] : null;
+    if(!file)return;
+    const llm=document.getElementById('llm-select').value;
+    const api_key=document.getElementById('api-key').value.trim()||null;
+    const btn=document.getElementById('fw-image-btn');
+    const promptBtn=document.getElementById('fw-btn');
+    const loader=document.getElementById('fw-loader');
+    const meta=document.getElementById('fw-file-meta');
+    const formData=new FormData();
+    formData.append('file',file);
+    formData.append('llm',llm);
+    formData.append('proceed_on_warn',proceed_on_warn ? 'true' : 'false');
+    if(api_key)formData.append('api_key',api_key);
+    btn.disabled=true;
+    promptBtn.disabled=true;
+    loader.classList.add('active');
+    hideResults();
+    try{
+      const res=await fetch('/api/firewall-image',{
+        method:'POST',
+        headers:{'X-CSRFToken':getCookie('csrftoken')||''},
+        body:formData
+      });
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||'Image firewall request failed');
+      renderDecision(data,llm,'image');
+      meta.replaceChildren();
+      meta.appendChild(makeBadge(data.file.name,'badge badge-allow'));
+      meta.appendChild(makeBadge(`${Math.ceil(data.file.size/1024)} KB analysed`,'badge'));
+      meta.appendChild(makeBadge('Image','badge'));
+    }catch(err){
+      showToast(err.message,'error');
+    }finally{
+      btn.disabled=false;
+      promptBtn.disabled=false;
       loader.classList.remove('active');
     }
   }

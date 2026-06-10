@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .analyzer import generative_analyze
+from .analyzer import generative_analyze, generative_analyze_image
 
 
 @dataclass
@@ -117,3 +117,41 @@ class Firewall:
             analysis_available=bool(result.get("analysis_available", True)),
             fallback_used=bool(result.get("fallback_used", False)),
         )
+
+    def analyze_image(self, image_base64: str, mime_type: str) -> FirewallResult:
+        """
+        Analyse an image using Gemini's multimodal vision capability.
+
+        Args:
+            image_base64: Base64-encoded image bytes.
+            mime_type:     MIME type (e.g. "image/png").
+
+        Returns:
+            FirewallResult object with full analysis details.
+        """
+        start_time = time.time()
+
+        result = generative_analyze_image(
+            image_base64=image_base64,
+            mime_type=mime_type,
+            api_key=self.api_key,
+            model=self.model,
+        )
+
+        elapsed_ms = (time.time() - start_time) * 1000
+
+        reasoning_list = result.get("reasoning", [])
+        ai_reasoning_str = " | ".join(reasoning_list) if reasoning_list else "No analysis available"
+
+        return FirewallResult(
+            decision=result["decision"],
+            threat_level=result["threat_level"],
+            risk_score=result["risk_score"],
+            attack_types=result["attack_types"],
+            reasons=reasoning_list,
+            ai_reasoning=ai_reasoning_str,
+            processing_time_ms=elapsed_ms,
+            analysis_available=bool(result.get("analysis_available", True)),
+            fallback_used=bool(result.get("fallback_used", False)),
+        )
+

@@ -10,7 +10,7 @@
       <p class="page-sub">Review firewall decisions, forwarded prompts, warning overrides, and adapter errors.</p>
     </div>
     <div class="status-row">
-      <span class="chip">Auto-refresh 15s</span>
+      <span class="chip">Auto-refresh 30s</span>
       <span class="chip">SQLite audit store</span>
     </div>
   </div>
@@ -23,13 +23,38 @@
     <div class="stat-card"><div class="stat-label">Forwarded</div><div class="stat-num">{{ forwarded }}</div></div>
     <div class="stat-card"><div class="stat-label">Warn Overrides</div><div class="stat-num warn">{{ overrides }}</div></div>
     <div class="stat-card"><div class="stat-label">LLM Errors</div><div class="stat-num danger">{{ llm_errors }}</div></div>
-    <div class="stat-card"><div class="stat-label">Block Rate</div><div class="stat-num danger">{{ block_pct }}%</div></div>
+    <div class="stat-card"><div class="stat-label">Avg Risk Score</div><div class="stat-num">{{ avg_score }}</div></div>
   </div>
 
+  <!-- ─── Charts Section ─── -->
+  <div class="charts-grid">
+    <section class="panel chart-panel">
+      <h2 class="section-title">Decision Distribution</h2>
+      <div class="chart-wrap"><canvas id="decisionsChart"></canvas></div>
+    </section>
+    <section class="panel chart-panel">
+      <h2 class="section-title">Risk Score Distribution</h2>
+      <div class="chart-wrap"><canvas id="scoreChart"></canvas></div>
+    </section>
+    <section class="panel chart-panel">
+      <h2 class="section-title">Top Attack Types</h2>
+      <div class="chart-wrap"><canvas id="attackChart"></canvas></div>
+    </section>
+    <section class="panel chart-panel">
+      <h2 class="section-title">Daily Activity</h2>
+      <div class="chart-wrap"><canvas id="dailyChart"></canvas></div>
+    </section>
+  </div>
+
+  <!-- ─── Audit Table ─── -->
   <section class="panel">
     <div class="panel-head">
       <h2 class="section-title">Recent Audit Records</h2>
-      <span class="chip"><span id="visible-count">{{ recent|length }}</span> visible</span>
+      <div class="status-row">
+        <span class="chip"><span id="visible-count">{{ recent|length }}</span> visible</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportLogs('csv')" title="Download CSV">⬇ CSV</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportLogs('json')" title="Download JSON">⬇ JSON</button>
+      </div>
     </div>
 
     <div class="filter-row">
@@ -136,7 +161,159 @@
   <div class="drawer-row"><div class="drawer-key">Client</div><div class="drawer-value" id="drawer-client">-</div></div>
 </aside>
 
+<style>
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .chart-panel {
+    padding: 1.25rem;
+  }
+  .chart-wrap {
+    position: relative;
+    height: 220px;
+    margin-top: 0.75rem;
+  }
+  .btn-sm {
+    min-height: 32px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.78rem;
+  }
+  @media (max-width: 860px) {
+    .charts-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
+  /* ─── Chart.js Global Defaults ─── */
+  Chart.defaults.color = '#7e8da1';
+  Chart.defaults.borderColor = 'rgba(34,49,67,0.45)';
+  Chart.defaults.font.family = "'Inter', sans-serif";
+  Chart.defaults.font.size = 11;
+  Chart.defaults.plugins.legend.labels.boxWidth = 12;
+  Chart.defaults.plugins.legend.labels.padding = 14;
+
+  const SAFE = '#20d67b';
+  const WARN = '#ffb020';
+  const DANGER = '#ff4d6d';
+  const ACCENT = '#16d7e8';
+
+  /* ─── 1. Decisions Doughnut ─── */
+  const decData = {{ chart_decisions|safe }};
+  new Chart(document.getElementById('decisionsChart'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Allowed', 'Warned', 'Blocked'],
+      datasets: [{
+        data: decData,
+        backgroundColor: [SAFE, WARN, DANGER],
+        borderWidth: 0,
+        hoverOffset: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '62%',
+      plugins: {
+        legend: { position: 'bottom' },
+      }
+    }
+  });
+
+  /* ─── 2. Risk Score Distribution ─── */
+  const scoreLabels = {{ chart_score_labels|safe }};
+  const scoreValues = {{ chart_score_values|safe }};
+  new Chart(document.getElementById('scoreChart'), {
+    type: 'bar',
+    data: {
+      labels: scoreLabels,
+      datasets: [{
+        label: 'Prompts',
+        data: scoreValues,
+        backgroundColor: [SAFE, '#3bdba5', WARN, '#e8873c', DANGER],
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: 'rgba(34,49,67,0.3)' } },
+        x: { grid: { display: false } },
+      }
+    }
+  });
+
+  /* ─── 3. Attack Types Horizontal Bar ─── */
+  const atkLabels = {{ chart_attack_labels|safe }};
+  const atkValues = {{ chart_attack_values|safe }};
+  if (atkLabels.length) {
+    new Chart(document.getElementById('attackChart'), {
+      type: 'bar',
+      data: {
+        labels: atkLabels,
+        datasets: [{
+          label: 'Count',
+          data: atkValues,
+          backgroundColor: DANGER,
+          borderRadius: 6,
+          borderSkipped: false,
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: 'rgba(34,49,67,0.3)' } },
+          y: { grid: { display: false } },
+        }
+      }
+    });
+  } else {
+    document.getElementById('attackChart').parentElement.innerHTML =
+      '<div class="muted" style="display:grid;place-items:center;height:100%;font-family:var(--font-mono);font-size:0.82rem;">No attacks detected yet</div>';
+  }
+
+  /* ─── 4. Daily Activity Stacked Bar ─── */
+  const dayLabels = {{ chart_daily_labels|safe }};
+  const dayBlock = {{ chart_daily_block|safe }};
+  const dayWarn = {{ chart_daily_warn|safe }};
+  const dayAllow = {{ chart_daily_allow|safe }};
+  if (dayLabels.length) {
+    new Chart(document.getElementById('dailyChart'), {
+      type: 'bar',
+      data: {
+        labels: dayLabels,
+        datasets: [
+          { label: 'Blocked', data: dayBlock, backgroundColor: DANGER, borderRadius: 4, borderSkipped: false },
+          { label: 'Warned',  data: dayWarn,  backgroundColor: WARN,   borderRadius: 4, borderSkipped: false },
+          { label: 'Allowed', data: dayAllow, backgroundColor: SAFE,   borderRadius: 4, borderSkipped: false },
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' } },
+        scales: {
+          x: { stacked: true, grid: { display: false } },
+          y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, grid: { color: 'rgba(34,49,67,0.3)' } },
+        }
+      }
+    });
+  } else {
+    document.getElementById('dailyChart').parentElement.innerHTML =
+      '<div class="muted" style="display:grid;place-items:center;height:100%;font-family:var(--font-mono);font-size:0.82rem;">No activity data yet</div>';
+  }
+
+  /* ─── Audit Table Logic ─── */
   function rowMatchesFlow(row,flow){
     if(!flow)return true;
     if(flow==='forwarded')return row.dataset.forwarded==='true';
@@ -181,6 +358,19 @@
     drawer.classList.remove('open');
     drawer.setAttribute('aria-hidden','true');
   }
-  setTimeout(()=>location.reload(),15000);
+
+  /* ─── Export ─── */
+  function exportLogs(format) {
+    const decision = document.getElementById('decision-filter').value;
+    const event = document.getElementById('event-filter').value;
+    const params = new URLSearchParams({ format });
+    if (decision) params.set('decision', decision);
+    if (event) params.set('event', event);
+    window.location.href = `/dashboard/export/?${params.toString()}`;
+    showToast(`Downloading ${format.toUpperCase()} export...`, 'success');
+  }
+
+  /* Auto-refresh every 30 seconds */
+  setTimeout(()=>location.reload(), 30000);
 </script>
 {% endblock %}
