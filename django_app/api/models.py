@@ -14,6 +14,7 @@ class PromptLog(models.Model):
     ]
 
     request_id = models.CharField(max_length=36, db_index=True, blank=True)
+    session_id = models.CharField(max_length=64, db_index=True, blank=True, default="")
     event_type = models.CharField(max_length=20, choices=EVENT_CHOICES, default=EVENT_ANALYZE)
     prompt = models.TextField()
     prompt_length = models.PositiveIntegerField(default=0)

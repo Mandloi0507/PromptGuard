@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 import os
+import warnings
 
 # --- Load .env file (keeps secrets out of source code) ---
 _env_path = Path(__file__).resolve().parent.parent / '.env'
@@ -41,6 +42,17 @@ SECRET_KEY = os.environ.get(
     'DJANGO_SECRET_KEY',
     'django-insecure-dev-only-change-me'
 )
+
+# Warn loudly if the insecure fallback key is used in production
+_INSECURE_KEY = 'django-insecure-dev-only-change-me'
+if SECRET_KEY == _INSECURE_KEY and not os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true':
+    warnings.warn(
+        "\n\n⚠️  SECURITY WARNING: Using the default insecure SECRET_KEY in "
+        "production!\nSet DJANGO_SECRET_KEY in your environment or .env file.\n"
+        "Generate one with: python -c \"from django.core.management.utils import "
+        "get_random_secret_key; print(get_random_secret_key())\"\n",
+        stacklevel=1,
+    )
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true'
@@ -73,6 +85,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'api.middleware.RateLimitMiddleware',
 ]
 
 ROOT_URLCONF = 'prompt_firewall.urls'
@@ -157,3 +170,18 @@ X_FRAME_OPTIONS = 'DENY'
 # Reads from .env file or environment variable (never hardcode keys here)
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', os.environ.get('GOOGLE_API_KEY', ''))
 
+# --- Rate Limiting ---
+# Uses Django's built-in cache. Switch to Redis for production.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'promptguard-ratelimit',
+    }
+}
+RATE_LIMIT_PER_MINUTE = int(os.environ.get('RATE_LIMIT_PER_MINUTE', '30'))
+
+# --- Webhook Alerting ---
+# Set PROMPTGUARD_WEBHOOK_URL to receive real-time alerts on BLOCK events.
+# e.g. Slack incoming webhook, PagerDuty, or a custom endpoint.
+PROMPTGUARD_WEBHOOK_URL = os.environ.get('PROMPTGUARD_WEBHOOK_URL', '')
+PROMPTGUARD_WEBHOOK_THRESHOLD = int(os.environ.get('PROMPTGUARD_WEBHOOK_THRESHOLD', '80'))

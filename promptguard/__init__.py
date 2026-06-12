@@ -81,12 +81,14 @@ class Firewall:
         self.api_key = api_key
         self.model = model
 
-    def analyze(self, prompt: str) -> FirewallResult:
+    def analyze(self, prompt: str, session_context: list = None) -> FirewallResult:
         """
         Analyse a prompt using generative AI detection.
 
         Args:
-            prompt: The user's input string to evaluate.
+            prompt:          The user's input string to evaluate.
+            session_context: Optional list of recent prompt strings from the
+                             same session for multi-turn attack detection.
 
         Returns:
             FirewallResult object with full analysis details.
@@ -98,6 +100,7 @@ class Firewall:
             prompt=prompt,
             api_key=self.api_key,
             model=self.model,
+            session_context=session_context,
         )
 
         elapsed_ms = (time.time() - start_time) * 1000

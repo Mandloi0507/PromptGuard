@@ -17,6 +17,10 @@ from django.conf import settings
 from promptguard import Firewall
 from promptguard.adapters import get_adapter
 from .models import PromptLog
+from .webhooks import send_block_webhook
+
+# Maximum number of recent session prompts to include as context
+SESSION_CONTEXT_LIMIT = 5
 
 firewall = Firewall(api_key=getattr(settings, 'GEMINI_API_KEY', None))
 MAX_PROMPT_CHARS = 8000
@@ -53,12 +57,24 @@ def _read_json_body(request):
 
 
 def _clean_prompt(raw_prompt):
+    """Validate and return (prompt, truncated, original_length).
+
+    Rejects oversized prompts outright (Option A) rather than silently
+    truncating. The truncated flag is always returned for consistency
+    with the file upload response format.
+    """
     prompt = str(raw_prompt or "").strip()
     if not prompt:
         raise ValueError("prompt is required")
-    if len(prompt) > MAX_PROMPT_CHARS:
-        raise ValueError(f"prompt must be {MAX_PROMPT_CHARS} characters or fewer")
-    return prompt
+    original_length = len(prompt)
+    if original_length > MAX_PROMPT_CHARS:
+        raise ValueError(
+            f"Prompt too long ({original_length} chars). "
+            f"Maximum allowed is {MAX_PROMPT_CHARS} characters. "
+            "Please shorten the prompt or use the file upload endpoint "
+            "for larger content."
+        )
+    return prompt, False, original_length
 
 
 def _redact_for_log(value):
@@ -181,6 +197,7 @@ def _write_audit_log(
     event_type,
     prompt,
     result,
+    session_id="",
     llm_name=None,
     llm_response=None,
     llm_error=None,
@@ -189,6 +206,7 @@ def _write_audit_log(
 ):
     return PromptLog.objects.create(
         request_id=request_id,
+        session_id=session_id,
         event_type=event_type,
         prompt=_redact_for_log(prompt),
         prompt_length=len(prompt),
@@ -208,6 +226,51 @@ def _write_audit_log(
         user_agent=request.META.get("HTTP_USER_AGENT", "")[:1000],
         path=request.path,
         processing_time_ms=result.processing_time_ms,
+    )
+
+
+def _get_session_id(request, body=None):
+    """Extract session ID from request body or Django session."""
+    if body and isinstance(body, dict):
+        sid = body.get("session_id", "")
+        if sid:
+            return str(sid).strip()[:64]
+    # Fall back to Django session key
+    if hasattr(request, 'session') and request.session.session_key:
+        return request.session.session_key
+    return ""
+
+
+def _get_session_context(session_id):
+    """Fetch recent prompts from the same session for multi-turn analysis."""
+    if not session_id:
+        return None
+    recent = (
+        PromptLog.objects
+        .filter(session_id=session_id)
+        .order_by('-created_at')
+        .values_list('prompt', flat=True)
+        [:SESSION_CONTEXT_LIMIT]
+    )
+    prompts = list(recent)
+    if not prompts:
+        return None
+    # Reverse so oldest is first (chronological order)
+    prompts.reverse()
+    return prompts
+
+
+def _maybe_send_webhook(request, *, result, prompt, request_id):
+    """Fire a webhook alert if this is a high-severity BLOCK."""
+    send_block_webhook(
+        decision=result.decision,
+        risk_score=result.risk_score,
+        attack_types=result.attack_types,
+        reasoning=result.reasons,
+        client_ip=_get_client_ip(request),
+        request_id=request_id,
+        prompt_snippet=prompt[:200] if prompt else "",
+        path=request.path,
     )
 
 
@@ -263,20 +326,36 @@ def _analysis_payload(result):
 def analyze(request):
     try:
         body = _read_json_body(request)
-        prompt = _clean_prompt(body.get("prompt"))
+        prompt, truncated, original_length = _clean_prompt(body.get("prompt"))
         request_id = str(uuid.uuid4())
+        session_id = _get_session_id(request, body)
 
-        result = _effective_result(firewall.analyze(prompt))
+        # Fetch recent session history for multi-turn attack detection
+        session_context = _get_session_context(session_id)
+
+        result = _effective_result(
+            firewall.analyze(prompt, session_context=session_context)
+        )
 
         _write_audit_log(
             request,
             request_id=request_id,
+            session_id=session_id,
             event_type=PromptLog.EVENT_ANALYZE,
             prompt=prompt,
             result=result,
         )
 
-        return JsonResponse(_analysis_payload(result))
+        _maybe_send_webhook(
+            request, result=result, prompt=prompt, request_id=request_id
+        )
+
+        response_data = _analysis_payload(result)
+        response_data["truncated"] = truncated
+        response_data["original_chars"] = original_length
+        if session_id:
+            response_data["session_id"] = session_id
+        return JsonResponse(response_data)
 
     except json.JSONDecodeError:
         return _error_response("Invalid JSON", status=400)
@@ -299,12 +378,17 @@ def analyze_file(request):
 
         result = _effective_result(firewall.analyze(analysis_prompt))
 
+        log_prompt = f"[file: {file_info['file_name']}]\n{file_info['text']}"
         _write_audit_log(
             request,
             request_id=request_id,
             event_type=PromptLog.EVENT_ANALYZE,
-            prompt=f"[file: {file_info['file_name']}]\n{file_info['text']}",
+            prompt=log_prompt,
             result=result,
+        )
+
+        _maybe_send_webhook(
+            request, result=result, prompt=log_prompt, request_id=request_id
         )
 
         return JsonResponse({
@@ -329,8 +413,9 @@ def analyze_file(request):
 def firewall_view(request):
     try:
         body = _read_json_body(request)
-        prompt = _clean_prompt(body.get("prompt"))
+        prompt, truncated, original_length = _clean_prompt(body.get("prompt"))
         request_id = str(uuid.uuid4())
+        session_id = _get_session_id(request, body)
         llm_name = str(body.get("llm", "ollama")).strip().lower()
         api_key = body.get("api_key", None)
         proceed_on_warn = bool(body.get("proceed_on_warn", False))
@@ -338,7 +423,12 @@ def firewall_view(request):
         if llm_name not in ALLOWED_LLMS:
             return _error_response("Unsupported LLM adapter", status=400)
 
-        result = _effective_result(firewall.analyze(prompt))
+        # Fetch recent session history for multi-turn attack detection
+        session_context = _get_session_context(session_id)
+
+        result = _effective_result(
+            firewall.analyze(prompt, session_context=session_context)
+        )
         classifier_trusted = _classifier_trusted(result)
 
         llm_response = None
@@ -366,6 +456,7 @@ def firewall_view(request):
         _write_audit_log(
             request,
             request_id=request_id,
+            session_id=session_id,
             event_type=event_type,
             prompt=prompt,
             result=result,
@@ -378,8 +469,14 @@ def firewall_view(request):
             ),
         )
 
+        _maybe_send_webhook(
+            request, result=result, prompt=prompt, request_id=request_id
+        )
+
         response_data = {
             **_analysis_payload(result),
+            "truncated": truncated,
+            "original_chars": original_length,
             "llm_used": llm_name if should_forward else None,
             "llm_response": llm_response,
             "forwarded_to_llm": should_forward and llm_error is None,
@@ -388,6 +485,8 @@ def firewall_view(request):
                 classifier_trusted and result.decision == "WARN" and should_forward
             ),
         }
+        if session_id:
+            response_data["session_id"] = session_id
 
         if result.decision != "ALLOW":
             response_data["block_reason"] = (
@@ -454,11 +553,12 @@ def firewall_file(request):
         else:
             event_type = PromptLog.EVENT_FIREWALL
 
+        log_prompt = f"[file: {file_info['file_name']}]\n{file_info['text']}"
         _write_audit_log(
             request,
             request_id=request_id,
             event_type=event_type,
-            prompt=f"[file: {file_info['file_name']}]\n{file_info['text']}",
+            prompt=log_prompt,
             result=result,
             llm_name=llm_name,
             llm_response=llm_response,
@@ -467,6 +567,10 @@ def firewall_file(request):
             proceeded_after_warning=(
                 classifier_trusted and result.decision == "WARN" and should_forward
             ),
+        )
+
+        _maybe_send_webhook(
+            request, result=result, prompt=log_prompt, request_id=request_id
         )
 
         response_data = {
@@ -552,12 +656,17 @@ def analyze_image(request):
             )
         )
 
+        log_prompt = f"[image: {image_info['file_name']}]"
         _write_audit_log(
             request,
             request_id=request_id,
             event_type=PromptLog.EVENT_ANALYZE,
-            prompt=f"[image: {image_info['file_name']}]",
+            prompt=log_prompt,
             result=result,
+        )
+
+        _maybe_send_webhook(
+            request, result=result, prompt=log_prompt, request_id=request_id
         )
 
         return JsonResponse({
@@ -631,11 +740,12 @@ def firewall_image(request):
         else:
             event_type = PromptLog.EVENT_FIREWALL
 
+        log_prompt = f"[image: {image_info['file_name']}]"
         _write_audit_log(
             request,
             request_id=request_id,
             event_type=event_type,
-            prompt=f"[image: {image_info['file_name']}]",
+            prompt=log_prompt,
             result=result,
             llm_name=llm_name,
             llm_response=llm_response,
@@ -644,6 +754,10 @@ def firewall_image(request):
             proceeded_after_warning=(
                 classifier_trusted and result.decision == "WARN" and should_forward
             ),
+        )
+
+        _maybe_send_webhook(
+            request, result=result, prompt=log_prompt, request_id=request_id
         )
 
         response_data = {
