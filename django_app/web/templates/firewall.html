@@ -46,16 +46,15 @@
       <div class="form-grid" style="margin-top:1rem;">
         <div>
           <label for="llm-select">AI Model</label>
-          <select id="llm-select" onchange="toggleKey()">
+          <select id="llm-select">
             <option value="ollama">Ollama (local)</option>
             <option value="claude">Claude</option>
             <option value="openai">OpenAI GPT</option>
             <option value="gemini">Gemini</option>
           </select>
         </div>
-        <div id="apikey-wrap" style="display:none;">
-          <label for="api-key">API Key</label>
-          <input type="password" id="api-key" placeholder="Paste key for hosted models"/>
+        <div>
+          <span class="chip" style="margin-top:1.65rem;">API keys resolved server-side</span>
         </div>
       </div>
 
@@ -136,6 +135,26 @@
     <div id="llm-response-wrap" class="result-hidden" style="margin-top:1rem;">
       <h2 class="section-title">AI Response</h2>
       <div class="llm-box" id="llm-response">-</div>
+    </div>
+
+    <div id="output-scan-wrap" class="result-hidden" style="margin-top:1rem;">
+      <h2 class="section-title">Output Scan</h2>
+      <div class="metric-grid">
+        <div class="metric">
+          <div class="metric-label">Output Decision</div>
+          <div class="metric-value" id="output-decision">-</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Output Risk</div>
+          <div class="metric-value" id="output-risk">-</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Scan Time</div>
+          <div class="metric-value" id="output-time">-</div>
+        </div>
+      </div>
+      <div class="status-row" id="output-attack-types" style="margin-top:0.5rem;"></div>
+      <ul class="reasons" id="output-reasons" style="margin-top:0.5rem;"></ul>
     </div>
   </section>
 
@@ -291,9 +310,6 @@
   let lastWarningResult=null;
   let lastWarningModel=null;
   let lastWarningSource='prompt';
-  function toggleKey(){
-    document.getElementById('apikey-wrap').style.display=document.getElementById('llm-select').value==='ollama'?'none':'block';
-  }
   function setPrompt(t){
     document.getElementById('fw-prompt').value=t;
     updateCounter('fw-prompt','fw-count');
@@ -327,7 +343,6 @@
   }
   function clearFirewall(){
     document.getElementById('fw-prompt').value='';
-    document.getElementById('api-key').value='';
     document.getElementById('fw-file-input').value='';
     document.getElementById('fw-image-input').value='';
     document.getElementById('fw-file-meta').replaceChildren();
@@ -372,6 +387,7 @@
   function hideResults(){
     document.getElementById('decision-result').classList.add('result-hidden');
     document.getElementById('llm-response-wrap').classList.add('result-hidden');
+    document.getElementById('output-scan-wrap').classList.add('result-hidden');
     closeWarningReview();
     setWarnActionsVisible(false);
   }
@@ -446,17 +462,36 @@
     }
 
     const responseWrap=document.getElementById('llm-response-wrap');
+    const outputScanWrap=document.getElementById('output-scan-wrap');
     if(forwarded){
       document.getElementById('llm-response').textContent=data.llm_response||data.llm_error||'No response.';
       responseWrap.classList.remove('result-hidden');
+      // Show output scan results if available
+      if(data.output_scanned){
+        document.getElementById('output-decision').textContent=data.output_decision;
+        document.getElementById('output-decision').className=`metric-value ${data.output_decision==='BLOCK'?'text-danger':data.output_decision==='WARN'?'text-warn':'text-safe'}`;
+        document.getElementById('output-risk').textContent=`${data.output_risk_score} / 100`;
+        document.getElementById('output-time').textContent=`${data.output_scan_time_ms}ms`;
+        const outputAttacks=document.getElementById('output-attack-types');
+        outputAttacks.replaceChildren();
+        if(data.output_attack_types && data.output_attack_types.length){
+          data.output_attack_types.forEach(t=>outputAttacks.appendChild(makeBadge(t.replace(/_/g,' '),'badge badge-block')));
+        }else{
+          outputAttacks.appendChild(makeBadge('Output clean','badge badge-allow'));
+        }
+        replaceChildrenTextList(document.getElementById('output-reasons'),data.output_reasoning||[],'Response passed output scan');
+        outputScanWrap.classList.remove('result-hidden');
+      }else{
+        outputScanWrap.classList.add('result-hidden');
+      }
     }else{
       responseWrap.classList.add('result-hidden');
+      outputScanWrap.classList.add('result-hidden');
     }
   }
   async function runFirewall(proceed_on_warn=false){
     const prompt=document.getElementById('fw-prompt').value.trim();
     const llm=document.getElementById('llm-select').value;
-    const api_key=document.getElementById('api-key').value.trim()||null;
     if(!prompt)return;
     const btn=document.getElementById('fw-btn');
     const loader=document.getElementById('fw-loader');
@@ -467,7 +502,7 @@
       const res=await fetch('/api/firewall',{
         method:'POST',
         headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')||''},
-        body:JSON.stringify({prompt,llm,api_key,proceed_on_warn})
+        body:JSON.stringify({prompt,llm,proceed_on_warn})
       });
       const data=await res.json();
       if(!res.ok)throw new Error(data.error||'Firewall request failed');
@@ -483,7 +518,6 @@
     const file=selectedFirewallFile();
     if(!file)return;
     const llm=document.getElementById('llm-select').value;
-    const api_key=document.getElementById('api-key').value.trim()||null;
     const btn=document.getElementById('fw-file-btn');
     const promptBtn=document.getElementById('fw-btn');
     const loader=document.getElementById('fw-loader');
@@ -492,7 +526,6 @@
     formData.append('file',file);
     formData.append('llm',llm);
     formData.append('proceed_on_warn',proceed_on_warn ? 'true' : 'false');
-    if(api_key)formData.append('api_key',api_key);
     btn.disabled=true;
     promptBtn.disabled=true;
     loader.classList.add('active');
@@ -532,7 +565,6 @@
     const file=input.files && input.files.length ? input.files[0] : null;
     if(!file)return;
     const llm=document.getElementById('llm-select').value;
-    const api_key=document.getElementById('api-key').value.trim()||null;
     const btn=document.getElementById('fw-image-btn');
     const promptBtn=document.getElementById('fw-btn');
     const loader=document.getElementById('fw-loader');
@@ -541,7 +573,6 @@
     formData.append('file',file);
     formData.append('llm',llm);
     formData.append('proceed_on_warn',proceed_on_warn ? 'true' : 'false');
-    if(api_key)formData.append('api_key',api_key);
     btn.disabled=true;
     promptBtn.disabled=true;
     loader.classList.add('active');

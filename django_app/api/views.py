@@ -274,6 +274,65 @@ def _maybe_send_webhook(request, *, result, prompt, request_id):
     )
 
 
+def _resolve_llm_api_key(llm_name):
+    """Resolve API key for a downstream LLM from server-side config only.
+
+    Keys NEVER come from the client request body — this is a fundamental
+    security principle. All keys are read from environment variables via
+    settings.LLM_API_KEYS.
+    """
+    llm_keys = getattr(settings, 'LLM_API_KEYS', {})
+    key = llm_keys.get(llm_name, '')
+    if key:
+        return key
+    # Ollama is local, no key needed
+    if llm_name == 'ollama':
+        return None
+    return None
+
+
+def _scan_llm_output(llm_response):
+    """Scan an LLM response for unsafe content before returning to user.
+
+    Returns (safe_response, output_scan_result) where:
+      - safe_response is the original or a redacted replacement
+      - output_scan_result is the FirewallResult from scanning, or None
+    """
+    if not getattr(settings, 'OUTPUT_SCANNING_ENABLED', True):
+        return llm_response, None
+    if not llm_response:
+        return llm_response, None
+
+    output_result = firewall.scan_output(llm_response)
+
+    if output_result.decision == 'BLOCK':
+        redacted = (
+            "[BLOCKED BY OUTPUT FIREWALL] The AI model's response was "
+            "intercepted because it contained potentially unsafe content: "
+            + ", ".join(output_result.attack_types or ["unsafe content"])
+            + ". The original response has been withheld."
+        )
+        return redacted, output_result
+
+    # WARN and ALLOW: return original response with scan metadata
+    return llm_response, output_result
+
+
+def _output_scan_payload(output_result):
+    """Build JSON payload for output scan results."""
+    if output_result is None:
+        return {"output_scanned": False}
+    return {
+        "output_scanned": True,
+        "output_decision": output_result.decision,
+        "output_risk_score": output_result.risk_score,
+        "output_threat_level": output_result.threat_level,
+        "output_attack_types": output_result.attack_types,
+        "output_reasoning": output_result.reasons,
+        "output_scan_time_ms": round(output_result.processing_time_ms, 1),
+    }
+
+
 def _classifier_trusted(result):
     return bool(
         getattr(result, "analysis_available", True)
@@ -417,11 +476,13 @@ def firewall_view(request):
         request_id = str(uuid.uuid4())
         session_id = _get_session_id(request, body)
         llm_name = str(body.get("llm", "ollama")).strip().lower()
-        api_key = body.get("api_key", None)
         proceed_on_warn = bool(body.get("proceed_on_warn", False))
 
         if llm_name not in ALLOWED_LLMS:
             return _error_response("Unsupported LLM adapter", status=400)
+
+        # Resolve API key server-side only — never from client body
+        api_key = _resolve_llm_api_key(llm_name)
 
         # Fetch recent session history for multi-turn attack detection
         session_context = _get_session_context(session_id)
@@ -433,6 +494,7 @@ def firewall_view(request):
 
         llm_response = None
         llm_error = None
+        output_scan_result = None
 
         should_forward = classifier_trusted and (
             result.decision == "ALLOW"
@@ -442,7 +504,9 @@ def firewall_view(request):
         if should_forward:
             try:
                 adapter = get_adapter(llm_name)
-                llm_response = adapter.send(prompt, api_key=api_key)
+                raw_response = adapter.send(prompt, api_key=api_key)
+                # Output scanning: scan the LLM response before returning
+                llm_response, output_scan_result = _scan_llm_output(raw_response)
             except Exception as e:
                 llm_error = str(e)
 
@@ -475,6 +539,7 @@ def firewall_view(request):
 
         response_data = {
             **_analysis_payload(result),
+            **_output_scan_payload(output_scan_result),
             "truncated": truncated,
             "original_chars": original_length,
             "llm_used": llm_name if should_forward else None,
@@ -517,7 +582,6 @@ def firewall_file(request):
         file_info = _extract_uploaded_file_text(uploaded_file)
         request_id = str(uuid.uuid4())
         llm_name = str(request.POST.get("llm", "ollama")).strip().lower()
-        api_key = request.POST.get("api_key", None)
         proceed_on_warn = str(request.POST.get("proceed_on_warn", "")).lower() in {
             "1", "true", "yes", "on"
         }
@@ -525,12 +589,16 @@ def firewall_file(request):
         if llm_name not in ALLOWED_LLMS:
             return _error_response("Unsupported LLM adapter", status=400)
 
+        # Resolve API key server-side only
+        api_key = _resolve_llm_api_key(llm_name)
+
         analysis_prompt = _build_file_analysis_prompt(file_info)
         result = _effective_result(firewall.analyze(analysis_prompt))
         classifier_trusted = _classifier_trusted(result)
 
         llm_response = None
         llm_error = None
+        output_scan_result = None
         should_forward = classifier_trusted and (
             result.decision == "ALLOW"
             or (result.decision == "WARN" and proceed_on_warn)
@@ -539,10 +607,12 @@ def firewall_file(request):
         if should_forward:
             try:
                 adapter = get_adapter(llm_name)
-                llm_response = adapter.send(
+                raw_response = adapter.send(
                     _build_file_forward_prompt(file_info),
                     api_key=api_key,
                 )
+                # Output scanning
+                llm_response, output_scan_result = _scan_llm_output(raw_response)
             except Exception as e:
                 llm_error = str(e)
 
@@ -575,6 +645,7 @@ def firewall_file(request):
 
         response_data = {
             **_analysis_payload(result),
+            **_output_scan_payload(output_scan_result),
             "llm_used": llm_name if should_forward else None,
             "llm_response": llm_response,
             "forwarded_to_llm": should_forward and llm_error is None,
@@ -698,13 +769,15 @@ def firewall_image(request):
         image_info = _extract_image_data(uploaded_file)
         request_id = str(uuid.uuid4())
         llm_name = str(request.POST.get("llm", "ollama")).strip().lower()
-        api_key = request.POST.get("api_key", None)
         proceed_on_warn = str(request.POST.get("proceed_on_warn", "")).lower() in {
             "1", "true", "yes", "on"
         }
 
         if llm_name not in ALLOWED_LLMS:
             return _error_response("Unsupported LLM adapter", status=400)
+
+        # Resolve API key server-side only
+        api_key = _resolve_llm_api_key(llm_name)
 
         result = _effective_result(
             firewall.analyze_image(
@@ -716,6 +789,7 @@ def firewall_image(request):
 
         llm_response = None
         llm_error = None
+        output_scan_result = None
         should_forward = classifier_trusted and (
             result.decision == "ALLOW"
             or (result.decision == "WARN" and proceed_on_warn)
@@ -724,12 +798,14 @@ def firewall_image(request):
         if should_forward:
             try:
                 adapter = get_adapter(llm_name)
-                llm_response = adapter.send(
+                raw_response = adapter.send(
                     f"The user uploaded an image ({image_info['file_name']}). "
                     "The image was scanned and found safe. "
                     "Please describe what you see in the image.",
                     api_key=api_key,
                 )
+                # Output scanning
+                llm_response, output_scan_result = _scan_llm_output(raw_response)
             except Exception as e:
                 llm_error = str(e)
 
@@ -762,6 +838,7 @@ def firewall_image(request):
 
         response_data = {
             **_analysis_payload(result),
+            **_output_scan_payload(output_scan_result),
             "llm_used": llm_name if should_forward else None,
             "llm_response": llm_response,
             "forwarded_to_llm": should_forward and llm_error is None,

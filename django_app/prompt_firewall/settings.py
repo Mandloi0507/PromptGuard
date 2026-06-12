@@ -185,3 +185,20 @@ RATE_LIMIT_PER_MINUTE = int(os.environ.get('RATE_LIMIT_PER_MINUTE', '30'))
 # e.g. Slack incoming webhook, PagerDuty, or a custom endpoint.
 PROMPTGUARD_WEBHOOK_URL = os.environ.get('PROMPTGUARD_WEBHOOK_URL', '')
 PROMPTGUARD_WEBHOOK_THRESHOLD = int(os.environ.get('PROMPTGUARD_WEBHOOK_THRESHOLD', '80'))
+
+# --- Downstream LLM API Keys (server-side only) ---
+# Keys are resolved exclusively from environment variables.
+# Clients should NEVER send API keys in request bodies.
+LLM_API_KEYS = {
+    'openai':    os.environ.get('OPENAI_API_KEY', ''),
+    'gpt':       os.environ.get('OPENAI_API_KEY', ''),
+    'claude':    os.environ.get('ANTHROPIC_API_KEY', ''),
+    'anthropic': os.environ.get('ANTHROPIC_API_KEY', ''),
+    'gemini':    os.environ.get('GEMINI_API_KEY', os.environ.get('GOOGLE_API_KEY', '')),
+    'google':    os.environ.get('GEMINI_API_KEY', os.environ.get('GOOGLE_API_KEY', '')),
+    'ollama':    '',  # Ollama is local, no key needed
+}
+
+# --- Output Response Scanning ---
+# When enabled, LLM responses are scanned before being returned to the user.
+OUTPUT_SCANNING_ENABLED = os.environ.get('OUTPUT_SCANNING_ENABLED', 'True').lower() == 'true'
